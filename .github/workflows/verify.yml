@@ -1,0 +1,27 @@
+name: Verify Hermes canary action
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Hermes PHI canary (local composite)
+        uses: ./
+        with:
+          ruleset: hipaa-safe-harbor-16
+          fail-on-leak: 'true'
+          output-dir: ./hermes-evidence
+
+      - name: Upload compliance receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-evidence
+          path: ./hermes-evidence/*.json
+          if-no-files-found: warn

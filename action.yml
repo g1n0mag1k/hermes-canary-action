@@ -1,0 +1,60 @@
+name: Hermes PHI Canary
+description: Zero-egress synthetic PHI canary tests for error monitoring scrubbers with tamper-evident compliance receipts.
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  sentry-dsn:
+    description: Optional Sentry DSN used to validate remote scrubber behavior.
+    required: false
+    default: ''
+  hermes-api-key:
+    description: Optional Hermes Relay API key for signed telemetry upload.
+    required: false
+    default: ''
+  ruleset:
+    description: Scrubber ruleset identifier to apply during canary verification.
+    required: false
+    default: hipaa-safe-harbor-16
+  fail-on-leak:
+    description: Exit with failure when any PHI leak is detected.
+    required: false
+    default: 'true'
+  output-dir:
+    description: Directory where the JSON compliance receipt is written.
+    required: false
+    default: ./hermes-evidence
+
+outputs:
+  status:
+    description: Overall canary outcome (PASSED or FAILED).
+    value: ${{ steps.hermes-canary.outputs.status }}
+  receipt-path:
+    description: Local filesystem path to the generated JSON receipt.
+    value: ${{ steps.hermes-canary.outputs.receipt-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install -r "${{ github.action_path }}/requirements.txt"
+
+    - name: Run Hermes PHI canary harness
+      id: hermes-canary
+      shell: bash
+      env:
+        SENTRY_DSN: ${{ inputs.sentry-dsn }}
+        HERMES_API_KEY: ${{ inputs.hermes-api-key }}
+        RULESET: ${{ inputs.ruleset }}
+        FAIL_ON_LEAK: ${{ inputs.fail-on-leak }}
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_SHA: ${{ github.sha }}
+      run: python "${{ github.action_path }}/entrypoint.py"
