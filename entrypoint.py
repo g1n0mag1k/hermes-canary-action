@@ -25,7 +25,162 @@ class CanaryVector:
     category: str
     safe_harbor_label: str
     sample: str
+    needle: str
     scrubber: Callable[[str], str]
+
+
+_VIN_CHARSET = "ABCDEFGHJKLMNPRSTUVWXYZ0123456789"
+_BASE64_SAFE = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+_FIRST_NAMES = (
+    "Aaron",
+    "Abigail",
+    "Adam",
+    "Aiden",
+    "Alice",
+    "Amelia",
+    "Andrew",
+    "Anna",
+    "Anthony",
+    "Ava",
+    "Benjamin",
+    "Caleb",
+    "Chloe",
+    "Daniel",
+    "David",
+    "Ella",
+    "Emily",
+    "Ethan",
+    "Grace",
+    "Hannah",
+    "Henry",
+    "Isaac",
+    "Jack",
+    "Jacob",
+    "James",
+    "Liam",
+    "Lucas",
+    "Mason",
+    "Mia",
+    "Noah",
+    "Olivia",
+    "Sophia",
+)
+
+_LAST_NAMES = (
+    "Anderson",
+    "Baker",
+    "Bennett",
+    "Brooks",
+    "Campbell",
+    "Carter",
+    "Clark",
+    "Collins",
+    "Cooper",
+    "Davis",
+    "Edwards",
+    "Evans",
+    "Foster",
+    "Garcia",
+    "Gonzalez",
+    "Gray",
+    "Hall",
+    "Harris",
+    "Hayes",
+    "Hill",
+    "Howard",
+    "Hughes",
+    "Jackson",
+    "Johnson",
+    "Kelly",
+    "King",
+    "Lee",
+    "Lewis",
+    "Martin",
+    "Miller",
+    "Mitchell",
+    "Moore",
+    "Morgan",
+    "Murphy",
+    "Nelson",
+    "Parker",
+    "Perez",
+    "Powell",
+    "Reed",
+    "Richardson",
+    "Roberts",
+    "Robinson",
+    "Rodriguez",
+    "Ross",
+    "Russell",
+    "Sanchez",
+    "Scott",
+    "Stewart",
+    "Taylor",
+    "Thomas",
+    "Thompson",
+    "Turner",
+    "Walker",
+    "Ward",
+    "Watson",
+    "White",
+    "Williams",
+    "Wilson",
+    "Wood",
+    "Wright",
+    "Young",
+)
+
+
+def _rand_n_digit_phone_component() -> str:
+    return "".join(str(secrets.randbelow(8) + 2) for _ in range(3))
+
+
+def _rand_phone_formatted() -> str:
+    last_four = f"{secrets.randbelow(10000):04d}"
+    return f"({_rand_n_digit_phone_component()}) {_rand_n_digit_phone_component()}-{last_four}"
+
+
+def _rand_digits(length: int) -> str:
+    return "".join(str(secrets.randbelow(10)) for _ in range(length))
+
+
+def _rand_upper_alnum(length: int) -> str:
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def _rand_lower_word(length: int) -> str:
+    return "".join(secrets.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(length))
+
+
+def _rand_date_mmddyyyy() -> str:
+    year = secrets.randbelow(2020 - 1990 + 1) + 1990
+    month = secrets.randbelow(12) + 1
+    if month == 2:
+        max_day = 28
+    elif month in (4, 6, 9, 11):
+        max_day = 30
+    else:
+        max_day = 31
+    day = secrets.randbelow(max_day) + 1
+    return f"{month:02d}/{day:02d}/{year}"
+
+
+def _rand_vin() -> str:
+    return "".join(secrets.choice(_VIN_CHARSET) for _ in range(17))
+
+
+def _rand_ipv4_10_range() -> str:
+    return f"10.{secrets.randbelow(256)}.{secrets.randbelow(256)}.{secrets.randbelow(256)}"
+
+
+def _rand_hex_upper(length: int) -> str:
+    return "".join(secrets.choice("0123456789ABCDEF") for _ in range(length))
+
+
+def _rand_base64_fragment(length: int) -> str:
+    return "".join(secrets.choice(_BASE64_SAFE) for _ in range(length))
 
 
 def _redact(pattern: str, label: str, text: str, flags: int = 0) -> str:
@@ -133,35 +288,140 @@ def _build_scrubbers() -> Dict[str, Callable[[str], str]]:
 
 def _default_canary_vectors() -> List[CanaryVector]:
     scrubbers = _build_scrubbers()
-    samples: List[Tuple[str, str, str]] = [
-        ("names", "Names", "Patient: Jane Q. Public was seen by Dr. Samuel Reed."),
-        ("dates", "Dates", "Admission on 03/15/2024 and follow-up 2024-04-01."),
-        ("phone_numbers", "Phone Numbers", "Callback at (415) 555-0199 after discharge."),
-        ("fax", "Fax", "Send records via Fax: 415-555-0100."),
-        ("email", "Email", "Contact jane.public@example-clinic.org for results."),
-        ("ssn", "SSN", "Legacy index SSN 123-45-6789 must be redacted."),
-        ("mrn", "MRN", "Chart MRN: 0049281736 updated."),
-        ("health_plan_ids", "Health Plan IDs", "Coverage PLAN# HPLN8X92K1M4Q7 verified."),
-        ("account_numbers", "Account Numbers", "Billing ACCT# 8844221199003344 posted."),
-        ("license_numbers", "License Numbers", "Provider LIC# CA-MED-928174."),
-        ("vins", "VINs", "Transport vehicle VIN 1HGCM82633A004352 noted."),
-        ("device_serials", "Device Serials", "Pump SERIAL SN-AB12CD34EF56 registered."),
-        ("web_urls", "Web URLs", "Portal https://portal.example-clinic.org/patient/9281."),
-        ("ip_addresses", "IP Addresses", "Session originated from 192.168.44.12."),
-        ("biometric_ids", "Biometric IDs", "Template BIO# A1B2C3D4E5F60718293A4B5C6D7E8F90 stored."),
+    first = secrets.choice(_FIRST_NAMES)
+    last = secrets.choice(_LAST_NAMES)
+    patient_name = f"{first} {last}"
+
+    date_value = _rand_date_mmddyyyy()
+    phone_value = _rand_phone_formatted()
+    fax_phone = _rand_phone_formatted()
+    email_local = _rand_lower_word(secrets.randbelow(5) + 5)
+    email_domain = _rand_lower_word(secrets.randbelow(4) + 4)
+    email_value = f"{email_local}@{email_domain}.org"
+    ssn_value = f"{_rand_digits(3)}-{_rand_digits(2)}-{_rand_digits(4)}"
+    mrn_value = _rand_digits(8)
+    plan_suffix = _rand_upper_alnum(10)
+    plan_token = f"HPLN{plan_suffix}"
+    account_value = _rand_digits(16)
+    license_suffix = _rand_digits(6)
+    license_token = f"CA-MED-{license_suffix}"
+    vin_value = _rand_vin()
+    serial_value = _rand_upper_alnum(12)
+    portal_hex = secrets.token_hex(4)
+    record_id = _rand_digits(8)
+    web_url = (
+        f"https://patient-portal-{portal_hex}.example-clinic.org/record/{record_id}"
+    )
+    ip_value = _rand_ipv4_10_range()
+    bio_value = _rand_hex_upper(32)
+    photo_payload = _rand_base64_fragment(32)
+
+    specs: List[Tuple[str, str, str, str]] = [
+        (
+            "names",
+            "Names",
+            f"Patient: {patient_name} was seen for routine care.",
+            patient_name,
+        ),
+        (
+            "dates",
+            "Dates",
+            f"Admission on {date_value} and chart updated.",
+            date_value,
+        ),
+        (
+            "phone_numbers",
+            "Phone Numbers",
+            f"Callback at {phone_value} after discharge.",
+            phone_value,
+        ),
+        (
+            "fax",
+            "Fax",
+            f"Send records via Fax: {fax_phone}.",
+            fax_phone,
+        ),
+        (
+            "email",
+            "Email",
+            f"Contact {email_value} for results.",
+            email_value,
+        ),
+        (
+            "ssn",
+            "SSN",
+            f"Legacy index SSN {ssn_value} must be redacted.",
+            ssn_value,
+        ),
+        (
+            "mrn",
+            "MRN",
+            f"Chart MRN: {mrn_value} updated.",
+            mrn_value,
+        ),
+        (
+            "health_plan_ids",
+            "Health Plan IDs",
+            f"Coverage PLAN# {plan_token} verified.",
+            plan_token,
+        ),
+        (
+            "account_numbers",
+            "Account Numbers",
+            f"Billing ACCT# {account_value} posted.",
+            account_value,
+        ),
+        (
+            "license_numbers",
+            "License Numbers",
+            f"Provider LIC# {license_token}.",
+            license_token,
+        ),
+        (
+            "vins",
+            "VINs",
+            f"Transport vehicle VIN {vin_value} noted.",
+            vin_value,
+        ),
+        (
+            "device_serials",
+            "Device Serials",
+            f"Pump SERIAL SN-{serial_value} registered.",
+            serial_value,
+        ),
+        (
+            "web_urls",
+            "Web URLs",
+            f"Portal {web_url}.",
+            web_url,
+        ),
+        (
+            "ip_addresses",
+            "IP Addresses",
+            f"Session originated from {ip_value}.",
+            ip_value,
+        ),
+        (
+            "biometric_ids",
+            "Biometric IDs",
+            f"Template BIO# {bio_value} stored.",
+            bio_value,
+        ),
         (
             "full_face_photos",
             "Full-face Photos",
-            "photo: data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBD",
+            f"photo: data:image/jpeg;base64,{photo_payload}",
+            photo_payload,
         ),
     ]
     vectors: List[CanaryVector] = []
-    for key, label, sample in samples:
+    for key, label, sample, needle in specs:
         vectors.append(
             CanaryVector(
                 category=key,
                 safe_harbor_label=label,
                 sample=sample,
+                needle=needle,
                 scrubber=scrubbers[key],
             )
         )
@@ -190,60 +450,19 @@ def _compose_scrubber(vectors: List[CanaryVector]) -> Callable[[str], str]:
 
 def _vector_leaked(vector: CanaryVector, scrubbed: str) -> bool:
     """Detect whether identifiable canary material survived scrubbing."""
-    # Extract high-signal tokens from the sample for residual matching.
-    tokens = [
-        "Jane Q. Public",
-        "Samuel Reed",
-        "03/15/2024",
-        "2024-04-01",
-        "(415) 555-0199",
-        "415-555-0100",
-        "jane.public@example-clinic.org",
-        "123-45-6789",
-        "0049281736",
-        "HPLN8X92K1M4Q7",
-        "8844221199003344",
-        "CA-MED-928174",
-        "1HGCM82633A004352",
-        "AB12CD34EF56",
-        "https://portal.example-clinic.org/patient/9281",
-        "192.168.44.12",
-        "A1B2C3D4E5F60718293A4B5C6D7E8F90",
-        "data:image/jpeg;base64",
-    ]
-    category_tokens = {
-        "names": ["Jane Q. Public", "Samuel Reed"],
-        "dates": ["03/15/2024", "2024-04-01"],
-        "phone_numbers": ["(415) 555-0199", "415-555-0199"],
-        "fax": ["415-555-0100"],
-        "email": ["jane.public@example-clinic.org"],
-        "ssn": ["123-45-6789"],
-        "mrn": ["0049281736"],
-        "health_plan_ids": ["HPLN8X92K1M4Q7"],
-        "account_numbers": ["8844221199003344"],
-        "license_numbers": ["CA-MED-928174"],
-        "vins": ["1HGCM82633A004352"],
-        "device_serials": ["AB12CD34EF56"],
-        "web_urls": ["https://portal.example-clinic.org/patient/9281"],
-        "ip_addresses": ["192.168.44.12"],
-        "biometric_ids": ["A1B2C3D4E5F60718293A4B5C6D7E8F90"],
-        "full_face_photos": ["data:image/jpeg;base64"],
-    }
-    del tokens  # category-specific matching only
-    for needle in category_tokens.get(vector.category, []):
-        if needle in scrubbed:
-            return True
-    return False
+    return vector.needle in scrubbed
 
 
-def _verify_sentry_scrubber(dsn: str, scrub: Callable[[str], str]) -> None:
+def _verify_sentry_scrubber(
+    dsn: str, scrub: Callable[[str], str], probe_vector: CanaryVector
+) -> None:
     """Optional remote scrubber smoke test — payload is scrubbed before any network egress."""
     if not dsn.strip():
         return
 
-    synthetic_message = "Hermes canary probe — " + _default_canary_vectors()[0].sample
+    synthetic_message = "Hermes canary probe — " + probe_vector.sample
     scrubbed = scrub(synthetic_message)
-    if _vector_leaked(_default_canary_vectors()[0], scrubbed):
+    if _vector_leaked(probe_vector, scrubbed):
         raise RuntimeError("Sentry scrubber path would leak PHI (pre-egress validation failed)")
 
     # Zero-egress: only send redacted envelope metadata to confirm DSN reachability.
@@ -292,7 +511,7 @@ def _run_canary_harness(ruleset: str, sentry_dsn: str) -> Tuple[str, Dict[str, i
             intercepted += 1
 
     if sentry_dsn:
-        _verify_sentry_scrubber(sentry_dsn, scrub)
+        _verify_sentry_scrubber(sentry_dsn, scrub, vectors[0])
 
     status = "PASSED" if leaks == 0 else "FAILED"
     summary = {
