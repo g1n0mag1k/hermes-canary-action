@@ -19,6 +19,11 @@ import requests
 CONTROLS_VERIFIED = ["HIPAA-164.312-e-1", "SOC2-CC6.1"]
 HERMES_TELEMETRY_URL = "https://api.hermesrelay.dev/v1/telemetry/receipt"
 
+TIER_FREE = "free"
+TIER_PRO = "pro"
+# Placeholder: replace with real Keygen Ed25519 public key before production launch
+KEYGEN_PUBLIC_KEY = "PLACEHOLDER_ED25519_PUBLIC_KEY"
+
 
 @dataclass(frozen=True)
 class CanaryVector:
@@ -303,6 +308,41 @@ def _run_canary_harness(ruleset: str, sentry_dsn: str) -> Tuple[str, Dict[str, i
     return status, summary
 
 
+def _mask_secret(value: str) -> None:
+    """Mask a secret in GitHub Actions logs so it never appears in clear text."""
+    if not value or not os.environ.get("GITHUB_ACTIONS"):
+        return
+    # ::add-mask:: redacts the value from subsequent workflow log lines.
+    print(f"::add-mask::{value}", flush=True)
+
+
+def _resolve_tier(license_key: str) -> str:
+    """Resolve paid vs free tier from an offline-verifiable license key.
+
+    Stub validation for Session 3: accepts HERMES-PRO-* test keys. Real Keygen
+    Ed25519 JWT verification (using KEYGEN_PUBLIC_KEY) lands in a later session.
+    Always fail-open to TIER_FREE — never raise, never log the key value.
+    """
+    try:
+        if not license_key or not license_key.strip():
+            return TIER_FREE
+        key = license_key.strip()
+        # Stub format for testing until real Keygen material is embedded.
+        if key.startswith("HERMES-PRO-"):
+            return TIER_PRO
+        print(
+            "Hermes: unrecognized license key format — running in free tier",
+            file=sys.stderr,
+        )
+        return TIER_FREE
+    except Exception:  # noqa: BLE001 — license gate must never crash CI
+        print(
+            "Hermes: license validation error — running in free tier",
+            file=sys.stderr,
+        )
+        return TIER_FREE
+
+
 def _build_receipt(
     status: str,
     summary: Dict[str, int],
@@ -310,8 +350,10 @@ def _build_receipt(
     commit_sha: str,
     timestamp: str,
     receipt_id: str,
+    signature_tier: str,
+    signature: Optional[str] = None,
 ) -> Dict[str, Any]:
-    return {
+    receipt: Dict[str, Any] = {
         "receipt_id": receipt_id,
         "timestamp": timestamp,
         "repository": repository,
@@ -319,7 +361,11 @@ def _build_receipt(
         "status": status,
         "controls_verified": CONTROLS_VERIFIED,
         "summary": summary,
+        "signature_tier": signature_tier,
     }
+    if signature is not None:
+        receipt["signature"] = signature
+    return receipt
 
 
 def _canonical_json(payload: Dict[str, Any]) -> str:
@@ -365,6 +411,7 @@ def main() -> int:
     ruleset = os.environ.get("RULESET", "hipaa-safe-harbor-16")
     sentry_dsn = os.environ.get("SENTRY_DSN", "")
     hermes_api_key = os.environ.get("HERMES_API_KEY", "")
+    hermes_license_key = os.environ.get("HERMES_LICENSE_KEY", "")
     fail_on_leak = os.environ.get("FAIL_ON_LEAK", "true").lower() in {
         "1",
         "true",
@@ -374,6 +421,14 @@ def main() -> int:
     output_dir = os.environ.get("OUTPUT_DIR", "./hermes-evidence")
     repository = os.environ.get("GITHUB_REPOSITORY", "local/hermes-canary-action")
     commit_sha = os.environ.get("GITHUB_SHA", "0000000000000000000000000000000000000000")
+
+    # Mask before any other logging so the key never appears in workflow logs.
+    _mask_secret(hermes_license_key)
+    if hermes_api_key.strip():
+        _mask_secret(hermes_api_key.strip())
+
+    tier = _resolve_tier(hermes_license_key)
+    # Pro unlocks extended rulesets in later sessions (Datadog, drift, etc.).
 
     try:
         status, summary = _run_canary_harness(ruleset, sentry_dsn)
@@ -388,14 +443,44 @@ def main() -> int:
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     receipt_id = f"rcpt-{secrets.token_hex(6)}"
-    receipt = _build_receipt(
-        status=status,
-        summary=summary,
-        repository=repository,
-        commit_sha=commit_sha,
-        timestamp=timestamp,
-        receipt_id=receipt_id,
-    )
+
+    api_key = hermes_api_key.strip()
+    signature: Optional[str] = None
+    if tier == TIER_PRO:
+        signature_tier = "signed-pro"
+        # Build unsigned body first, then HMAC-sign when an API key is present.
+        unsigned = _build_receipt(
+            status=status,
+            summary=summary,
+            repository=repository,
+            commit_sha=commit_sha,
+            timestamp=timestamp,
+            receipt_id=receipt_id,
+            signature_tier=signature_tier,
+        )
+        if api_key:
+            signature = _sign_receipt(unsigned, api_key)
+        receipt = _build_receipt(
+            status=status,
+            summary=summary,
+            repository=repository,
+            commit_sha=commit_sha,
+            timestamp=timestamp,
+            receipt_id=receipt_id,
+            signature_tier=signature_tier,
+            signature=signature,
+        )
+    else:
+        signature_tier = "unsigned-free"
+        receipt = _build_receipt(
+            status=status,
+            summary=summary,
+            repository=repository,
+            commit_sha=commit_sha,
+            timestamp=timestamp,
+            receipt_id=receipt_id,
+            signature_tier=signature_tier,
+        )
 
     os.makedirs(output_dir, exist_ok=True)
     safe_ts = timestamp.replace(":", "-")
@@ -408,14 +493,19 @@ def main() -> int:
 
     _write_github_output(status, receipt_path)
 
-    if hermes_api_key.strip():
+    # Telemetry is a Pro-tier feature; free tier never posts even if an API key is set.
+    if tier == TIER_PRO and api_key:
         try:
-            _post_telemetry(receipt, hermes_api_key.strip())
+            _post_telemetry(receipt, api_key)
         except Exception as exc:  # noqa: BLE001
             print(f"Hermes telemetry warning: {exc}", file=sys.stderr)
 
     print(f"Hermes canary status: {status}")
     print(f"Receipt written to: {receipt_path}")
+    if tier == TIER_FREE:
+        print(
+            "Hermes free tier — upgrade at hermesrelay.dev for signed receipts and drift detection"
+        )
 
     if status == "FAILED" and fail_on_leak:
         return 1

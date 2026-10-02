@@ -13,6 +13,10 @@ inputs:
     description: Optional Hermes Relay API key for signed telemetry upload.
     required: false
     default: ''
+  hermes-license-key:
+    description: "Hermes Relay Pro license key. Unlocks signed receipts, Datadog validation, drift detection, and extended rulesets."
+    required: false
+    default: ''
   ruleset:
     description: Scrubber ruleset identifier to apply during canary verification.
     required: false
@@ -52,6 +56,7 @@ runs:
       env:
         SENTRY_DSN: ${{ inputs.sentry-dsn }}
         HERMES_API_KEY: ${{ inputs.hermes-api-key }}
+        HERMES_LICENSE_KEY: ${{ inputs.hermes-license-key }}
         RULESET: ${{ inputs.ruleset }}
         FAIL_ON_LEAK: ${{ inputs.fail-on-leak }}
         OUTPUT_DIR: ${{ inputs.output-dir }}
