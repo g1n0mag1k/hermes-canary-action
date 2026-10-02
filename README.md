@@ -52,6 +52,9 @@ on:
 jobs:
   hermes-canary:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
 
@@ -71,6 +74,7 @@ jobs:
           path: ./hermes-evidence/*.json
 ```
 
+The `pull-requests: write` permission is required for PR comments. If your org restricts workflow permissions, see the GitHub docs on setting minimum required permissions.
 ## Hermes Relay Pro and Drata CCT syncing
 
 When you attach a **Hermes Relay Pro** API key, the action signs the receipt with **HMAC-SHA256** and POSTs it to Hermes Relay. Drata (and similar GRC platforms) can ingest those receipts via CCT sync to prove continuous scrubber verification tied to `repository` and `commit_sha`.

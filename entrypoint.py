@@ -278,34 +278,47 @@ def _parse_sentry_dsn(dsn: str) -> Tuple[str, str]:
     return match.group("key"), match.group("host")
 
 
-def _run_canary_harness(ruleset: str, sentry_dsn: str) -> Tuple[str, Dict[str, int]]:
+def _run_canary_harness(
+    ruleset: str, sentry_dsn: str
+) -> Tuple[str, Dict[str, Any], List[Dict[str, str]]]:
     vectors = _load_ruleset(ruleset)
     scrub = _compose_scrubber(vectors)
 
     leaks = 0
     intercepted = 0
+    category_results: List[Dict[str, str]] = []
     for vector in vectors:
         scrubbed = scrub(vector.sample)
         if _vector_leaked(vector, scrubbed):
             leaks += 1
+            result = "FAILED"
         else:
             intercepted += 1
+            result = "PASSED"
+        category_results.append(
+            {
+                "category": vector.category,
+                "label": vector.safe_harbor_label,
+                "result": result,
+            }
+        )
 
     if sentry_dsn:
         _verify_sentry_scrubber(sentry_dsn, scrub)
 
     status = "PASSED" if leaks == 0 else "FAILED"
-    summary = {
+    summary: Dict[str, Any] = {
         "vectors_tested": len(vectors),
         "canaries_intercepted": intercepted,
         "leaks_detected": leaks,
+        "category_results": category_results,
     }
-    return status, summary
+    return status, summary, category_results
 
 
 def _build_receipt(
     status: str,
-    summary: Dict[str, int],
+    summary: Dict[str, Any],
     repository: str,
     commit_sha: str,
     timestamp: str,
@@ -320,6 +333,167 @@ def _build_receipt(
         "controls_verified": CONTROLS_VERIFIED,
         "summary": summary,
     }
+
+
+PR_COMMENT_MARKER = "<!-- hermes-canary-result -->"
+
+
+def _build_pr_comment_body(
+    results: List[Dict[str, str]],
+    tier: str,
+    timestamp: str,
+    commit_sha: str,
+    receipt_artifact_url: Optional[str] = None,
+) -> str:
+    overall_failed = any(row.get("result") == "FAILED" for row in results)
+    status = "FAILED" if overall_failed else "PASSED"
+    status_emoji = "❌" if overall_failed else "✅"
+    short_sha = (commit_sha or "unknown")[:7]
+
+    if tier == "pro":
+        if receipt_artifact_url:
+            footer = (
+                f"✅ Signed receipt generated · "
+                f"[View receipt]({receipt_artifact_url})"
+            )
+        else:
+            footer = "✅ Signed receipt generated"
+    else:
+        footer = (
+            "🔒 **[Upgrade to Hermes Pro](https://hermesrelay.dev)** for signed "
+            "tamper-evident receipts, drift detection, and Datadog validation."
+        )
+
+    lines = [
+        PR_COMMENT_MARKER,
+        f"## 🛡️ Hermes PHI Canary — {status_emoji} {status}",
+        f"*Run: {timestamp} · Commit: `{short_sha}` · "
+        f"Ruleset: hipaa-safe-harbor-16*",
+        "",
+        "| # | Safe Harbor Category | Result |",
+        "|---|---|---|",
+    ]
+    for index, row in enumerate(results, start=1):
+        label = row.get("label", row.get("category", "Unknown"))
+        if row.get("result") == "PASSED":
+            cell = "✅ Intercepted"
+        else:
+            cell = "❌ Leaked"
+        lines.append(f"| {index} | {label} | {cell} |")
+    lines.extend(["", footer])
+    return "\n".join(lines)
+
+
+def _post_pr_comment(
+    results: List[Dict[str, str]],
+    tier: str,
+    timestamp: str,
+    github_token: str,
+    repo: str,
+    pr_number: int,
+    commit_sha: str = "",
+    receipt_artifact_url: Optional[str] = None,
+) -> Optional[str]:
+    """Post or update a Hermes canary summary comment on a pull request.
+
+    Fail-open: any HTTP/API error prints a warning and returns None.
+    Never logs the token value.
+    """
+    try:
+        body = _build_pr_comment_body(
+            results=results,
+            tier=tier,
+            timestamp=timestamp,
+            commit_sha=commit_sha,
+            receipt_artifact_url=receipt_artifact_url,
+        )
+        headers = {
+            "Authorization": f"Bearer {github_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        list_url = (
+            f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments"
+        )
+        list_response = requests.get(
+            list_url,
+            headers=headers,
+            params={"per_page": 100},
+            timeout=20,
+        )
+        if list_response.status_code >= 400:
+            print(
+                f"Hermes: PR comment warning — failed to list comments "
+                f"({list_response.status_code})",
+                file=sys.stderr,
+            )
+            return None
+
+        existing_id: Optional[int] = None
+        for comment in list_response.json():
+            comment_body = comment.get("body") or ""
+            if PR_COMMENT_MARKER in comment_body:
+                existing_id = comment.get("id")
+                break
+
+        if existing_id is not None:
+            patch_url = (
+                f"https://api.github.com/repos/{repo}/issues/comments/"
+                f"{existing_id}"
+            )
+            response = requests.patch(
+                patch_url,
+                headers=headers,
+                json={"body": body},
+                timeout=20,
+            )
+            action = "updated"
+        else:
+            response = requests.post(
+                list_url,
+                headers=headers,
+                json={"body": body},
+                timeout=20,
+            )
+            action = "created"
+
+        if response.status_code >= 400:
+            print(
+                f"Hermes: PR comment warning — failed to {action.rstrip('d')} "
+                f"comment ({response.status_code})",
+                file=sys.stderr,
+            )
+            return None
+
+        comment_url = response.json().get("html_url")
+        print(f"Hermes: PR comment {action}: {comment_url or existing_id}")
+        return comment_url
+    except Exception as exc:  # noqa: BLE001 — fail-open for CI continuity
+        print(f"Hermes: PR comment warning: {exc}", file=sys.stderr)
+        return None
+
+
+def _read_pr_number() -> Optional[int]:
+    """Resolve the PR number from GITHUB_EVENT_PATH or GITHUB_REF."""
+    event_path = os.environ.get("GITHUB_EVENT_PATH", "")
+    if event_path:
+        try:
+            with open(event_path, encoding="utf-8") as handle:
+                payload = json.load(handle)
+            number = payload.get("pull_request", {}).get("number")
+            if number is not None:
+                return int(number)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            print(
+                f"Hermes: could not parse GITHUB_EVENT_PATH ({exc})",
+                file=sys.stderr,
+            )
+
+    ref = os.environ.get("GITHUB_REF", "")
+    match = re.match(r"^refs/pull/(\d+)/", ref)
+    if match:
+        return int(match.group(1))
+    return None
 
 
 def _canonical_json(payload: Dict[str, Any]) -> str:
@@ -374,15 +548,31 @@ def main() -> int:
     output_dir = os.environ.get("OUTPUT_DIR", "./hermes-evidence")
     repository = os.environ.get("GITHUB_REPOSITORY", "local/hermes-canary-action")
     commit_sha = os.environ.get("GITHUB_SHA", "0000000000000000000000000000000000000000")
+    github_token = os.environ.get("GITHUB_TOKEN", "")
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
 
+    category_results: List[Dict[str, str]] = []
     try:
-        status, summary = _run_canary_harness(ruleset, sentry_dsn)
+        status, summary, category_results = _run_canary_harness(ruleset, sentry_dsn)
     except Exception as exc:  # noqa: BLE001 — surface harness failures as FAILED receipt
         status = "FAILED"
+        try:
+            fallback_vectors = _load_ruleset(ruleset)
+        except Exception:  # noqa: BLE001
+            fallback_vectors = _default_canary_vectors()
+        category_results = [
+            {
+                "category": vector.category,
+                "label": vector.safe_harbor_label,
+                "result": "FAILED",
+            }
+            for vector in fallback_vectors
+        ]
         summary = {
-            "vectors_tested": 16,
+            "vectors_tested": len(category_results) or 16,
             "canaries_intercepted": 0,
-            "leaks_detected": 16,
+            "leaks_detected": len(category_results) or 16,
+            "category_results": category_results,
         }
         print(f"Hermes canary harness error: {exc}", file=sys.stderr)
 
@@ -408,11 +598,38 @@ def main() -> int:
 
     _write_github_output(status, receipt_path)
 
+    tier = "pro" if hermes_api_key.strip() else "free"
     if hermes_api_key.strip():
         try:
             _post_telemetry(receipt, hermes_api_key.strip())
         except Exception as exc:  # noqa: BLE001
             print(f"Hermes telemetry warning: {exc}", file=sys.stderr)
+
+    # Free-tier surface: post/update a PR summary comment when running on a PR.
+    if event_name == "pull_request":
+        if not github_token.strip():
+            print(
+                "Hermes: GITHUB_TOKEN not available — skipping PR comment",
+                file=sys.stderr,
+            )
+        else:
+            pr_number = _read_pr_number()
+            if pr_number is None:
+                print(
+                    "Hermes: PR comment warning — could not determine PR number",
+                    file=sys.stderr,
+                )
+            else:
+                _post_pr_comment(
+                    results=category_results,
+                    tier=tier,
+                    timestamp=timestamp,
+                    github_token=github_token.strip(),
+                    repo=repository,
+                    pr_number=pr_number,
+                    commit_sha=commit_sha,
+                    receipt_artifact_url=os.environ.get("HERMES_RECEIPT_URL") or None,
+                )
 
     print(f"Hermes canary status: {status}")
     print(f"Receipt written to: {receipt_path}")
