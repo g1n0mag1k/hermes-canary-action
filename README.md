@@ -4,6 +4,18 @@
 
 Zero-egress synthetic PHI canary tests and tamper-evident compliance receipts for healthtech CI/CD pipelines. Drop this composite GitHub Action into your workflow to verify that error monitoring scrubbers (for example Sentry `before_send`, Relay processors, or Drata CCT-linked policies) redact all **16 HIPAA Safe Harbor** identifier categories before telemetry leaves your boundary.
 
+## Security
+
+Vulnerability disclosure, data-handling commitments, and least-privilege permissions are documented in [SECURITY.md](./SECURITY.md). A one-page plain-language model of what the action reads, what leaves the runner, and what the HMAC signature does (and does not) prove is in [THREAT-MODEL.md](./THREAT-MODEL.md). Release tagging and SHA recording are in [RELEASING.md](./RELEASING.md); pin targets live in [RELEASES.md](./RELEASES.md).
+
+For production use, pin to a full commit SHA:
+
+```yaml
+uses: g1n0mag1k/hermes-canary-action@{SHA}  # replace with SHA from RELEASES.md
+```
+
+Synthetic canaries (not real PHI) support HIPAA **164.312(b)** audit-control evidence and **164.316(b)** documentation of scrubber verification. This action is not HIPAA-certified, not SOC 2 audited, and not a BAA.
+
 ## How zero-egress canary mechanics work
 
 Traditional PHI tests often require copying realistic patient data into staging or sending payloads to third-party observability vendors. That increases breach surface and complicates BAA scope.

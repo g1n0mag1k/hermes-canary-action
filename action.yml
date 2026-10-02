@@ -1,3 +1,8 @@
+# Minimal workflow permissions for this action:
+#   permissions:
+#     pull-requests: write   # PR summary comments only
+# Does not require contents: write, secrets: read, or other elevated scopes.
+# See SECURITY.md and THREAT-MODEL.md.
 name: Hermes PHI Canary
 description: Zero-egress synthetic PHI canary tests for error monitoring scrubbers with tamper-evident compliance receipts.
 branding:
