@@ -18,6 +18,7 @@ import requests
 
 CONTROLS_VERIFIED = ["HIPAA-164.312-e-1", "SOC2-CC6.1"]
 HERMES_TELEMETRY_URL = "https://api.hermesrelay.dev/v1/telemetry/receipt"
+HERMES_SIGNING_KEY_ID = "hermes-canary-v1"
 
 
 @dataclass(frozen=True)
@@ -310,8 +311,11 @@ def _build_receipt(
     commit_sha: str,
     timestamp: str,
     receipt_id: str,
+    api_key: str,
+    key_id: str,
 ) -> Dict[str, Any]:
-    return {
+    # Signable body excludes hmac_sha256, signing_key_id, and signature_tier.
+    signable_body: Dict[str, Any] = {
         "receipt_id": receipt_id,
         "timestamp": timestamp,
         "repository": repository,
@@ -320,30 +324,33 @@ def _build_receipt(
         "controls_verified": CONTROLS_VERIFIED,
         "summary": summary,
     }
+    receipt = dict(signable_body)
+    if api_key:
+        signature = hmac.new(
+            api_key.encode("utf-8"),
+            _canonical_json(signable_body).encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        receipt["hmac_sha256"] = signature
+        receipt["signing_key_id"] = key_id
+        receipt["signature_tier"] = "signed-pro"
+    else:
+        receipt["hmac_sha256"] = None
+        receipt["signing_key_id"] = None
+        receipt["signature_tier"] = "unsigned-free"
+    return receipt
 
 
 def _canonical_json(payload: Dict[str, Any]) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
-def _sign_receipt(payload: Dict[str, Any], secret: str) -> str:
-    digest = hmac.new(
-        secret.encode("utf-8"),
-        _canonical_json(payload).encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-    return digest
-
-
-def _post_telemetry(payload: Dict[str, Any], api_key: str) -> None:
-    signature = _sign_receipt(payload, api_key)
+def _post_telemetry(payload: Dict[str, Any]) -> None:
+    # Receipt already embeds hmac_sha256; post the full signed body as-is.
     response = requests.post(
         HERMES_TELEMETRY_URL,
         data=_canonical_json(payload),
-        headers={
-            "Content-Type": "application/json",
-            "X-Hermes-Signature-256": signature,
-        },
+        headers={"Content-Type": "application/json"},
         timeout=20,
     )
     if response.status_code >= 400:
@@ -388,6 +395,7 @@ def main() -> int:
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     receipt_id = f"rcpt-{secrets.token_hex(6)}"
+    api_key = hermes_api_key.strip()
     receipt = _build_receipt(
         status=status,
         summary=summary,
@@ -395,6 +403,8 @@ def main() -> int:
         commit_sha=commit_sha,
         timestamp=timestamp,
         receipt_id=receipt_id,
+        api_key=api_key,
+        key_id=HERMES_SIGNING_KEY_ID,
     )
 
     os.makedirs(output_dir, exist_ok=True)
@@ -408,9 +418,9 @@ def main() -> int:
 
     _write_github_output(status, receipt_path)
 
-    if hermes_api_key.strip():
+    if api_key:
         try:
-            _post_telemetry(receipt, hermes_api_key.strip())
+            _post_telemetry(receipt)
         except Exception as exc:  # noqa: BLE001
             print(f"Hermes telemetry warning: {exc}", file=sys.stderr)
 

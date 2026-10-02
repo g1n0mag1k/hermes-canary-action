@@ -127,9 +127,14 @@ Each run writes `{output-dir}/{timestamp}_{receipt_id}.json`:
     "vectors_tested": 16,
     "canaries_intercepted": 16,
     "leaks_detected": 0
-  }
+  },
+  "hmac_sha256": "<sha256-hex-or-null>",
+  "signing_key_id": "hermes-canary-v1",
+  "signature_tier": "signed-pro"
 }
 ```
+
+To verify: re-serialize the receipt body (all fields except `hmac_sha256`, `signing_key_id`, and `signature_tier`, sorted by key) to canonical JSON and compute HMAC-SHA256 using your Hermes API key. The result must match `hmac_sha256`.
 
 Receipts are suitable as evidence for HIPAA **164.312(e)(1)** transmission integrity and SOC 2 **CC6.1** logical access / data protection control testing when paired with your scrubber configuration.
 
