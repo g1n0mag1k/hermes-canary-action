@@ -130,7 +130,10 @@ Each run writes `{output-dir}/{timestamp}_{receipt_id}.json`:
   "summary": {
     "vectors_tested": 16,
     "canaries_intercepted": 16,
-    "leaks_detected": 0
+    "leaks_detected": 0,
+    "category_results": [
+      {"category": "names", "label": "Names", "result": "PASSED"}
+    ]
   }
 }
 ```
