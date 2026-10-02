@@ -89,7 +89,7 @@ When you attach a **Hermes Relay Pro** API key, the action signs the receipt wit
 ```
 
 Telemetry endpoint: `POST https://api.hermesrelay.dev/v1/telemetry/receipt`  
-Header: `X-Hermes-Signature-256` — HMAC-SHA256 of the canonical JSON body using `hermes-api-key` as the secret.
+The signed receipt JSON (including `hmac_sha256`) is posted as the request body.
 
 ## Inputs
 
