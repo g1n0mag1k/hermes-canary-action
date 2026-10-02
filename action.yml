@@ -55,6 +55,10 @@ runs:
         RULESET: ${{ inputs.ruleset }}
         FAIL_ON_LEAK: ${{ inputs.fail-on-leak }}
         OUTPUT_DIR: ${{ inputs.output-dir }}
+        GITHUB_TOKEN: ${{ github.token }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         GITHUB_SHA: ${{ github.sha }}
+        GITHUB_EVENT_NAME: ${{ github.event_name }}
+        GITHUB_REF: ${{ github.ref }}
+        GITHUB_EVENT_PATH: ${{ github.event_path }}
       run: python "${{ github.action_path }}/entrypoint.py"

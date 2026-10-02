@@ -52,6 +52,9 @@ on:
 jobs:
   hermes-canary:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
 
@@ -70,6 +73,8 @@ jobs:
           name: hermes-receipt
           path: ./hermes-evidence/*.json
 ```
+
+The `pull-requests: write` permission is required for PR comments. If your org restricts workflow permissions, see the GitHub docs on setting minimum required permissions.
 
 ## Hermes Relay Pro and Drata CCT syncing
 
@@ -126,7 +131,10 @@ Each run writes `{output-dir}/{timestamp}_{receipt_id}.json`:
   "summary": {
     "vectors_tested": 16,
     "canaries_intercepted": 16,
-    "leaks_detected": 0
+    "leaks_detected": 0,
+    "category_results": [
+      {"category": "names", "label": "Names", "result": "PASSED"}
+    ]
   }
 }
 ```
