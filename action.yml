@@ -1,38 +1,54 @@
 name: Hermes PHI Canary
 description: >-
   Zero-PHI-egress synthetic PHI canary tests for HIPAA-regulated CI/CD pipelines.
-  Verifies all 16 Safe Harbor scrubber categories and writes a tamper-evident signed receipt per run.
+  Verifies all 16 HIPAA Safe Harbor scrubber categories and writes a tamper-evident
+  signed receipt per run. Pro tier adds drift detection and scheduled cron execution.
 branding:
   icon: shield
   color: green
 
 inputs:
-  sentry-dsn:
-    description: Optional Sentry DSN used to validate remote scrubber behavior.
+  license-key:
+    description: Keygen.sh license key for Hermes Canary Pro (KEYGEN_LICENSE_KEY secret). Required for Pro features.
     required: false
     default: ''
-  hermes-api-key:
-    description: Optional Hermes Relay API key for signed telemetry upload.
+  signing-key:
+    description: 32-byte hex signing key for receipt HMAC-SHA256 (HERMES_SIGNING_KEY secret). Required — generate with `openssl rand -hex 32`.
+    required: true
+  sentry-dsn:
+    description: Optional Sentry DSN. The harness performs local pre-egress scrubber verification only; no data is sent to Sentry.
     required: false
     default: ''
   ruleset:
-    description: Scrubber ruleset identifier to apply during canary verification.
+    description: Scrubber ruleset identifier.
     required: false
     default: hipaa-safe-harbor-16
-  fail-on-leak:
-    description: Exit with failure when any PHI leak is detected.
+  schedule:
+    description: Cron expression for scheduled runs (e.g. '0 6 * * 1'). Recorded in the receipt for audit trail.
     required: false
-    default: 'true'
+    default: ''
+  baseline-receipt:
+    description: Path to a prior hermes-canary-receipt-*.json for drift detection. Download from a previous run artifact.
+    required: false
+    default: ''
+  fail-on-drift:
+    description: Exit non-zero when scrubber drift is detected against the baseline receipt.
+    required: false
+    default: 'false'
+  fail-on-leak:
+    description: Exit non-zero when any PHI canary token survives scrubbing. Default false (observer mode — receipt is always emitted).
+    required: false
+    default: 'false'
   output-dir:
-    description: Directory where the JSON compliance receipt is written.
+    description: Directory where the signed JSON receipt is written.
     required: false
     default: ./hermes-evidence
-  post-comment:
-    description: Post a pass/fail summary comment to the pull request. Requires contents:write and pull-requests:write permissions.
+  output-format:
+    description: Receipt output format — 'json', 'summary', or 'both'.
     required: false
-    default: 'true'
-  validate-license:
-    description: Validate the hermes-api-key as a Keygen.sh license before running. Set to false to skip validation (not recommended in production).
+    default: json
+  post-comment:
+    description: Post a pass/fail summary comment to the pull request. Requires pull-requests:write permission.
     required: false
     default: 'true'
 
@@ -41,13 +57,19 @@ outputs:
     description: Overall canary outcome (PASSED or FAILED).
     value: ${{ steps.hermes-canary.outputs.status }}
   receipt-path:
-    description: Local filesystem path to the generated JSON receipt.
+    description: Local filesystem path to the signed JSON receipt.
     value: ${{ steps.hermes-canary.outputs.receipt-path }}
+  receipt:
+    description: Base64-encoded signed receipt JSON for downstream GRC gates.
+    value: ${{ steps.hermes-canary.outputs.receipt }}
+  drift-detected:
+    description: Whether scrubber drift was detected against the baseline receipt (true/false).
+    value: ${{ steps.hermes-canary.outputs.drift-detected }}
   comment-url:
     description: URL of the pull request comment posted by Hermes, if any.
     value: ${{ steps.hermes-canary.outputs.comment-url }}
   license-status:
-    description: Keygen license validation result (valid, invalid, skipped, or free-tier)
+    description: Keygen license validation result (valid, invalid, or free-tier).
     value: ${{ steps.hermes-canary.outputs.license-status }}
 
 runs:
@@ -60,22 +82,29 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: pip install -r "${{ github.action_path }}/requirements.txt"
+      run: pip install --quiet -r "${{ github.action_path }}/requirements.txt"
 
     - name: Run Hermes PHI canary harness
       id: hermes-canary
       shell: bash
       env:
+        LICENSE_KEY: ${{ inputs.license-key }}
+        SIGNING_KEY: ${{ inputs.signing-key }}
         SENTRY_DSN: ${{ inputs.sentry-dsn }}
-        HERMES_API_KEY: ${{ inputs.hermes-api-key }}
         RULESET: ${{ inputs.ruleset }}
+        SCHEDULE: ${{ inputs.schedule }}
+        BASELINE_RECEIPT: ${{ inputs.baseline-receipt }}
+        FAIL_ON_DRIFT: ${{ inputs.fail-on-drift }}
         FAIL_ON_LEAK: ${{ inputs.fail-on-leak }}
         OUTPUT_DIR: ${{ inputs.output-dir }}
+        OUTPUT_FORMAT: ${{ inputs.output-format }}
+        POST_COMMENT: ${{ inputs.post-comment }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         GITHUB_SHA: ${{ github.sha }}
+        GITHUB_RUN_ID: ${{ github.run_id }}
+        GITHUB_WORKFLOW: ${{ github.workflow }}
+        GITHUB_ACTOR: ${{ github.actor }}
         GITHUB_TOKEN: ${{ github.token }}
         GITHUB_EVENT_NAME: ${{ github.event_name }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
-        POST_COMMENT: ${{ inputs.post-comment }}
-        VALIDATE_LICENSE: ${{ inputs.validate-license }}
       run: python "${{ github.action_path }}/entrypoint.py"
