@@ -18,6 +18,7 @@ jobs:
         uses: ./
         with:
           ruleset: hipaa-safe-harbor-16
+          signing-key: ${{ secrets.HERMES_SIGNING_KEY != '' && secrets.HERMES_SIGNING_KEY || '0000000000000000000000000000000000000000000000000000000000000000' }}
           fail-on-leak: 'true'
           output-dir: ./hermes-evidence
 

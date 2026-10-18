@@ -75,6 +75,40 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        set -euo pipefail
+        signing_key="${{ inputs.signing-key }}"
+        ruleset="${{ inputs.ruleset }}"
+        fail_on_drift="${{ inputs.fail-on-drift }}"
+        fail_on_leak="${{ inputs.fail-on-leak }}"
+        output_format="${{ inputs.output-format }}"
+        if [[ -z "$signing_key" ]]; then
+          echo "::error::signing-key is required. Generate with: openssl rand -hex 32"
+          exit 1
+        fi
+        if ! [[ "$signing_key" =~ ^[0-9a-fA-F]{64}$ ]]; then
+          echo "::error::signing-key must be exactly 64 hex characters (32 bytes)."
+          exit 1
+        fi
+        if [[ "$ruleset" != "hipaa-safe-harbor-16" ]]; then
+          echo "::error::Invalid ruleset '$ruleset'. Supported: hipaa-safe-harbor-16"
+          exit 1
+        fi
+        if [[ "$fail_on_drift" != "true" && "$fail_on_drift" != "false" ]]; then
+          echo "::error::fail-on-drift must be 'true' or 'false'."
+          exit 1
+        fi
+        if [[ "$fail_on_leak" != "true" && "$fail_on_leak" != "false" ]]; then
+          echo "::error::fail-on-leak must be 'true' or 'false'."
+          exit 1
+        fi
+        if [[ "$output_format" != "json" && "$output_format" != "summary" && "$output_format" != "both" ]]; then
+          echo "::error::output-format must be 'json', 'summary', or 'both'."
+          exit 1
+        fi
+
     - name: Setup Python 3.11
       uses: actions/setup-python@v5
       with:
@@ -82,7 +116,9 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: pip install --quiet -r "${{ github.action_path }}/requirements.txt"
+      run: |
+        set -euo pipefail
+        pip install --quiet -r "${{ github.action_path }}/requirements.txt"
 
     - name: Run Hermes PHI canary harness
       id: hermes-canary
@@ -107,4 +143,21 @@ runs:
         GITHUB_TOKEN: ${{ github.token }}
         GITHUB_EVENT_NAME: ${{ github.event_name }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
-      run: python "${{ github.action_path }}/entrypoint.py"
+      run: |
+        set -euo pipefail
+        python "${{ github.action_path }}/entrypoint.py"
+
+    - name: Scrub canary residue from runner workspace
+      if: always()
+      shell: bash
+      env:
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+      run: |
+        set -euo pipefail
+        # Remove any temporary canary scratch files from workspace (not the evidence dir)
+        # The signed receipt in OUTPUT_DIR is intentionally preserved for artifact upload.
+        # This step ensures no canary tokens linger in temp locations after job completion.
+        if [[ -d "/tmp/hermes-canary-scratch" ]]; then
+          rm -rf /tmp/hermes-canary-scratch
+        fi
+        echo "::notice::Hermes canary workspace scrub complete."

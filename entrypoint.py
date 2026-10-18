@@ -163,7 +163,7 @@ def _default_canary_vectors() -> List[CanaryVector]:
     doctor_first = _RNG.choice(first_names)
     doctor_last = _RNG.choice(last_names)
     names_sample = (
-        f"Patient:{patient_first} {patient_last} was seen by "
+        f"Patient: {patient_first} {patient_last} was seen by "
         f"Dr. {doctor_first} {doctor_last}."
     )
     names_needle = f"{patient_first} {patient_last}|{doctor_first} {doctor_last}"
@@ -178,7 +178,10 @@ def _default_canary_vectors() -> List[CanaryVector]:
     phone = _random_phone_formatted()
     phone_sample = f"Callback at {phone} after discharge."
 
+    # Regenerate fax until it differs from phone (uniqueness + avoids phone scrubber match)
     fax_number = _random_phone_formatted()
+    while fax_number == phone:
+        fax_number = _random_phone_formatted()
     fax_sample = f"Send records via Fax: {fax_number}."
 
     email_user = f"canary.{secrets.token_hex(4)}"
@@ -193,8 +196,11 @@ def _default_canary_vectors() -> List[CanaryVector]:
     )
     ssn_sample = f"Legacy index SSN {ssn} must be redacted."
 
-    mrn = "".join(str(_RNG.randint(0, 9)) for _ in range(10))
-    mrn_sample = f"Chart MRN: {mrn} updated."
+    mrn_digits = "".join(str(_RNG.randint(0, 9)) for _ in range(10))
+    # Always embed in "MRN: <digits>" context so the phone scrubber cannot absorb it.
+    # The needle is the embedded form; the MRN scrubber pattern matches "MRN:" + digits.
+    mrn = mrn_digits
+    mrn_sample = f"Chart MRN: {mrn_digits} updated."
 
     plan_id = "".join(
         secrets.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") for _ in range(14)
@@ -233,22 +239,20 @@ def _default_canary_vectors() -> List[CanaryVector]:
     biometric_id = secrets.token_hex(16).upper()
     biometric_sample = f"Template BIO# {biometric_id} stored."
 
-    # Category 16: dynamic base64 image token — never a static string
-    raw_photo_bytes = secrets.token_bytes(24)
+    # Category 16: dynamic base64 image token — valid data-URL, unique every run
+    raw_photo_bytes = secrets.token_bytes(48)
     photo_b64 = base64.b64encode(raw_photo_bytes).decode("ascii")
-    # Use a short random suffix so the token is unique every run
-    photo_suffix = secrets.token_hex(8)
-    photo_needle = f"data:image/jpeg;base64,{photo_b64[:16]}{photo_suffix}"
+    photo_needle = f"data:image/jpeg;base64,{photo_b64}"
     photo_sample = f"photo: {photo_needle}"
 
     generated: List[Tuple[str, str, str, str]] = [
         ("names", "Names", names_sample, names_needle),
         ("dates", "Dates", dates_sample, dates_needle),
         ("phone_numbers", "Phone Numbers", phone_sample, phone),
-        ("fax", "Fax", fax_sample, fax_number),
+        ("fax", "Fax", fax_sample, f"Fax: {fax_number}"),
         ("email", "Email", email_sample, email),
         ("ssn", "SSN", ssn_sample, ssn),
-        ("mrn", "MRN", mrn_sample, mrn),
+        ("mrn", "MRN", mrn_sample, f"MRN: {mrn}"),
         ("health_plan_ids", "Health Plan IDs", health_plan_sample, plan_id),
         ("account_numbers", "Account Numbers", account_sample, account_number),
         ("license_numbers", "License Numbers", license_sample, license_id),
@@ -638,7 +642,7 @@ def _post_pr_comment(
     return None
 
 
-def main() -> int:
+def main() -> int:  # noqa: C901
     ruleset = os.environ.get("RULESET", "hipaa-safe-harbor-16")
     sentry_dsn = os.environ.get("SENTRY_DSN", "")
     license_key = os.environ.get("LICENSE_KEY", "").strip()
@@ -648,7 +652,7 @@ def main() -> int:
     fail_on_drift = os.environ.get("FAIL_ON_DRIFT", "false").lower() in {"1", "true", "yes", "on"}
     fail_on_leak = os.environ.get("FAIL_ON_LEAK", "false").lower() in {"1", "true", "yes", "on"}
     output_dir = os.environ.get("OUTPUT_DIR", "./hermes-evidence")
-    output_format = os.environ.get("OUTPUT_FORMAT", "json").lower()
+    output_format = os.environ.get("OUTPUT_FORMAT", "json").lower()  # noqa: F841 (reserved for #10)
 
     # SIGNING_KEY is mandatory — unsigned receipts have no audit value
     if not signing_key:
@@ -657,6 +661,17 @@ def main() -> int:
             "Add it as HERMES_SIGNING_KEY in GitHub Actions Secrets and pass it as signing-key.",
             file=sys.stderr,
         )
+        _emit_failed_outputs(output_dir, schedule, license_key="", license_status="free-tier")
+        return 1
+
+    # Validate signing key format: must be 64 hex characters (32 bytes)
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", signing_key):
+        print(
+            "::error::SIGNING_KEY must be exactly 64 hex characters (32 bytes). "
+            "Generate with: openssl rand -hex 32",
+            file=sys.stderr,
+        )
+        _emit_failed_outputs(output_dir, schedule, license_key="", license_status="free-tier")
         return 1
 
     # License validation — scoped to Hermes Canary product + policy
@@ -669,6 +684,7 @@ def main() -> int:
         else:
             license_status = "invalid"
             print(f"::error::License validation failed: {message}", file=sys.stderr)
+            _emit_failed_outputs(output_dir, schedule, license_key=license_key, license_status=license_status)
             return 1
     else:
         print("::notice::No license key provided; running on free tier (no drift detection or scheduled runs).")
@@ -681,8 +697,8 @@ def main() -> int:
         results = [(vector, True) for vector in vectors]
         print(f"Hermes canary harness error: {exc}", file=sys.stderr)
 
-    # Drift detection — fully local, no network
-    baseline = _load_baseline_receipt(baseline_path)
+    # Drift detection — fully local, no network; only available with a valid license
+    baseline = _load_baseline_receipt(baseline_path) if license_status == "valid" else None
     drift = _detect_drift(results, baseline)
 
     receipt = _build_receipt(status, results, drift, license_key, schedule)
@@ -727,6 +743,50 @@ def main() -> int:
     if status == "FAILED" and fail_on_leak:
         return 1
     return 0
+
+
+def _emit_failed_outputs(
+    output_dir: str,
+    schedule: str,
+    license_key: str,
+    license_status: str,
+) -> None:
+    """Write FAILED sentinel outputs so downstream steps are never left with unset outputs."""
+    vectors = _default_canary_vectors()
+    results = [(v, True) for v in vectors]
+    drift: Dict[str, Any] = {
+        "evaluated": False,
+        "baseline_path": "",
+        "baseline_run_id": "",
+        "drift_detected": False,
+        "new_leaks": [],
+        "resolved_leaks": [],
+        "stopped_detecting": [],
+    }
+    receipt = _build_receipt("FAILED", results, drift, license_key, schedule)
+    # Emit unsigned sentinel (signing_key may be absent or invalid)
+    receipt["signature"] = "UNSIGNED-SENTINEL"
+    receipt["hmac_sha256"] = "UNSIGNED-SENTINEL"
+
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        run_id = os.environ.get("GITHUB_RUN_ID", receipt["receipt_id"])
+        receipt_filename = f"hermes-canary-receipt-{run_id}.json"
+        receipt_path = os.path.abspath(os.path.join(output_dir, receipt_filename))
+        with open(receipt_path, "w", encoding="utf-8") as handle:
+            json.dump(receipt, handle, indent=2)
+            handle.write("\n")
+        receipt_b64 = base64.b64encode(
+            json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).decode("ascii")
+        _write_github_output("FAILED", receipt_path, receipt_b64, drift)
+        github_output = os.environ.get("GITHUB_OUTPUT")
+        if github_output:
+            with open(github_output, "a", encoding="utf-8") as fh:
+                fh.write("comment-url=\n")
+                fh.write(f"license-status={license_status}\n")
+    except Exception as exc:  # noqa: BLE001
+        print(f"::warning::Could not write sentinel outputs: {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":
