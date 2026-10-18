@@ -23,33 +23,31 @@ No real patient data is used. Canary strings never leave the runner in cleartext
 
 ### Safe Harbor categories exercised
 
-The 18 identifiers enumerated in **45 CFR § 164.514(b)(2)(i)** (the Safe Harbor de-identification method). Hermes exercises all 16 that can be represented as discrete test vectors in a CI pipeline.
+The 18 identifiers enumerated in **45 CFR § 164.514(b)(2)(i)** (the Safe Harbor de-identification method). Hermes exercises the 16 that can be represented as discrete test vectors in a CI pipeline (geographic data sub-state and "any other unique identifying number" are covered by the MRN/account vectors rather than dedicated canaries).
 
 | # | Category (45 CFR § 164.514(b)(2)(i)) | Example canary shape |
 |---|---------------------------------------|----------------------|
 | 1 | Names | `Patient: Jane Q. Public` |
-| 2 | Geographic data (sub-state) | `03/15/2024`, ISO dates |
-| 3 | Dates (except year) | `03/15/2024`, ISO dates |
-| 4 | Phone numbers | `(415) 555-0199` |
-| 5 | Fax numbers | `Fax: 415-555-0100` |
-| 6 | Email addresses | `user@example-clinic.org` |
-| 7 | SSNs | `123-45-6789` |
-| 8 | Medical record numbers (MRN) | `MRN: 0049281736` |
-| 9 | Health plan beneficiary numbers | `PLAN# HPLN…` |
-| 10 | Account numbers | `ACCT# …` |
-| 11 | Certificate / license numbers | `LIC# CA-MED-…` |
-| 12 | VINs and serial numbers | 17-character VIN |
-| 13 | Device identifiers and serial numbers | `SERIAL SN-…` |
-| 14 | Web URLs | `https://…` |
-| 15 | IP addresses | IPv4 literals |
-| 16 | Biometric identifiers | `BIO#` hex templates |
-| 17 | Full-face photographs | `data:image/jpeg;base64,…` marker |
-| 18 | Any other unique identifying number | *(covered by MRN / account vectors)* |
+| 2 | Dates (except year) | `03/15/2024`, ISO dates |
+| 3 | Phone numbers | `(415) 555-0199` |
+| 4 | Fax numbers | `Fax: 415-555-0100` |
+| 5 | Email addresses | `user@example-clinic.org` |
+| 6 | SSNs | `123-45-6789` |
+| 7 | Medical record numbers (MRN) | `MRN: 0049281736` |
+| 8 | Health plan beneficiary numbers | `PLAN# HPLN…` |
+| 9 | Account numbers | `ACCT# …` |
+| 10 | Certificate / license numbers | `LIC# CA-MED-…` |
+| 11 | VINs and serial numbers | 17-character VIN |
+| 12 | Device identifiers and serial numbers | `SERIAL SN-…` |
+| 13 | Web URLs | `https://…` |
+| 14 | IP addresses | IPv4 literals |
+| 15 | Biometric identifiers | `BIO#` hex templates |
+| 16 | Full-face photographs | `data:image/jpeg;base64,…` marker |
 
 ## Free tier
 
 - Full 16-category synthetic Safe Harbor canary harness
-- Local JSON compliance receipts on every run
+- Local JSON compliance receipts (HMAC-SHA256 signed) on every run
 - PR comment with pass/fail summary
 
 ## Quick start
@@ -102,7 +100,7 @@ When triggered on a pull request, Hermes posts a pass/fail summary comment autom
 
 **[Subscribe at hermesrelay.dev/canary →](https://hermesrelay.dev/canary)** — Launch pricing: $29/month per repository.
 
-When you attach a **Hermes Relay Pro** license key, the action signs every receipt locally with **HMAC-SHA256** using your `signing-key`. No data is uploaded to Hermes servers — signing is done on the runner. Drata (and similar GRC platforms) can ingest the signed receipt artifacts via CCT sync to prove continuous scrubber verification tied to `repository` and `commit_sha`.
+When you attach a **Hermes Relay Pro** license key, the action enables drift detection against prior baselines. Receipt signing with **HMAC-SHA256** is available on the **free tier** as well — no Pro license required. No data is uploaded to Hermes servers — signing is done on the runner. Drata (and similar GRC platforms) can ingest the signed receipt artifacts via CCT sync to prove continuous scrubber verification tied to `repository` and `commit_sha`.
 
 ```yaml
       - name: Run Hermes PHI canary (Pro)
@@ -110,7 +108,7 @@ When you attach a **Hermes Relay Pro** license key, the action signs every recei
         uses: g1n0mag1k/hermes-canary-action@v1
         with:
           signing-key: ${{ secrets.HERMES_SIGNING_KEY }}
-          license-key: ${{ secrets.HERMES_LICENSE_KEY }}
+          license-key: ${{ secrets.KEYGEN_LICENSE_KEY }}
           ruleset: hipaa-safe-harbor-16
           fail-on-leak: 'true'
           output-dir: ./hermes-evidence
@@ -142,7 +140,7 @@ An invalid or expired key causes the action to **exit non-zero** with a clear er
 | `fail-on-drift` | No | `boolean` | `'false'` | Exit non-zero when scrubber drift is detected against the baseline (Pro). |
 | `fail-on-leak` | No | `boolean` | `'false'` | Exit non-zero when any PHI canary token survives scrubbing. |
 | `output-dir` | No | `string` | `./hermes-evidence` | Directory where the signed JSON receipt is written. |
-| `output-format` | No | `string` | `json` | Receipt output format — `json`, `summary`, or `both`. |
+| `output-format` | No | `string` | `json` | Receipt output format — `json`, `summary`, or `both`. **Reserved for future use; only `json` output is produced in the current release.** |
 | `post-comment` | No | `boolean` | `'true'` | Post a pass/fail summary comment to the pull request. Requires `pull-requests: write`. |
 
 ## Outputs

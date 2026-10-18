@@ -9,7 +9,7 @@ branding:
 
 inputs:
   license-key:
-    description: Keygen.sh license key for Hermes Canary Pro (KEYGEN_LICENSE_KEY secret). Required for Pro features.
+    description: Keygen.sh license key for Hermes Canary Pro (store as KEYGEN_LICENSE_KEY secret). Required for Pro features (drift detection).
     required: false
     default: ''
   signing-key:
@@ -44,7 +44,10 @@ inputs:
     required: false
     default: ./hermes-evidence
   output-format:
-    description: Receipt output format — 'json', 'summary', or 'both'.
+    description: >-
+      Receipt output format — 'json', 'summary', or 'both'.
+      Reserved for future use; only 'json' output is produced in the current release.
+      Setting this to any value other than 'json' is accepted but has no effect.
     required: false
     default: json
   post-comment:

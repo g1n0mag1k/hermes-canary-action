@@ -5,7 +5,7 @@
 Use in the Marketplace **Summary** field. Character count: **259**.
 
 ```text
-Synthetic HIPAA Safe Harbor canary tests for CI/CD with zero PHI egress. Verifies all 16 scrubber categories and PR pass/fail. Pro adds signed receipts, drift detection, and Datadog checks—launch pricing $29/mo per repo on hermesrelay.dev, not GitHub billing.
+Synthetic HIPAA Safe Harbor canary tests for CI/CD with zero PHI egress. Verifies all 16 scrubber categories with signed receipts and PR pass/fail. Pro adds drift detection—launch pricing $29/mo per repo on hermesrelay.dev, not GitHub billing.
 ```
 
 ---
@@ -20,7 +20,7 @@ Healthtech teams rely on Sentry, Datadog, and similar tools for incident respons
 
 Each run exercises **all 16 HIPAA Safe Harbor identifier categories**—names, dates, phone and fax, email, SSN, MRN, health plan and account numbers, license numbers, VINs, device serials, URLs, IP addresses, biometric identifiers, and full-face photo markers—against your selected ruleset (`hipaa-safe-harbor-16` by default).
 
-**Pro** subscribers get a **tamper-evident signed receipt** per run, drift detection against prior baselines, Datadog log intake validation, extended rulesets, and optional archival via Hermes Relay. **Free** tier includes the full 16-category canary harness and PR-friendly pass/fail signaling.
+**Pro** subscribers get drift detection against prior baselines and optional archival via Hermes Relay. **Free** tier includes the full 16-category canary harness, HMAC-SHA256 signed receipts, and PR-friendly pass/fail signaling.
 
 ---
 
@@ -42,7 +42,7 @@ Your assessor, counsel, and GRC platform still own control design and scope. Her
 
 1. **Materialize** one synthetic vector per Safe Harbor category (16 total).
 2. **Apply** the configured scrubber ruleset the same way in-process or vendor-side scrubbers should.
-3. **Fail the job** when any canary survives redaction (`fail-on-leak`, default `true`).
+3. **Fail the job** when any canary survives redaction (`fail-on-leak`, default `false` — set to `'true'` to enforce).
 4. **Optionally probe Sentry** using a DSN: payloads are scrubbed before network egress.
 5. **Write evidence**: Every run writes a cryptographically signed JSON receipt to `output-dir` on the runner. **Pro** additionally enables drift detection against prior baselines and extended rulesets.
 
@@ -78,10 +78,8 @@ Optionally set `sentry-dsn` from secrets and `license-key: ${{ secrets.HERMES_LI
 |---------|------|--------------------------------------|
 | 16 Safe Harbor canary tests | ✅ | ✅ |
 | PR comment with results | ✅ | ✅ |
-| Signed tamper-evident receipt | ❌ | ✅ |
+| Signed tamper-evident receipt | ✅ | ✅ |
 | Drift detection | ❌ | ✅ |
-| Datadog log intake validation | ❌ | ✅ |
-| Extended rulesets | ❌ | ✅ |
 | Hermes Relay receipt archive | ❌ | ✅ |
 
 Subscribe at [hermesrelay.dev/canary](https://hermesrelay.dev/canary). After Stripe checkout, your license key appears on the Hermes dashboard — store it as `HERMES_LICENSE_KEY` in GitHub Secrets and pass it as the `license-key` input.
