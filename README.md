@@ -1,4 +1,7 @@
-![HIPAA](https://img.shields.io/badge/HIPAA-Safe%20Harbor%2016-blue) ![License](https://img.shields.io/github/license/g1n0mag1k/hermes-canary-action) ![GitHub Actions](https://img.shields.io/badge/GitHub%20Action-ready-green)
+[![Marketplace](https://img.shields.io/badge/GitHub%20Marketplace-Hermes%20PHI%20Canary-blue?logo=github)](https://github.com/marketplace/actions/hermes-phi-canary)
+[![Version](https://img.shields.io/github/v/release/g1n0mag1k/hermes-canary-action?label=version)](https://github.com/g1n0mag1k/hermes-canary-action/releases)
+[![License](https://img.shields.io/github/license/g1n0mag1k/hermes-canary-action)](LICENSE)
+[![HIPAA](https://img.shields.io/badge/HIPAA-Safe%20Harbor%2016-brightgreen)](https://www.hhs.gov/hipaa/for-professionals/privacy/special-topics/de-identification/index.html)
 
 # hermes-canary-action
 
@@ -20,24 +23,28 @@ No real patient data is used. Canary strings never leave the runner in cleartext
 
 ### Safe Harbor categories exercised
 
-| # | Category | Example canary shape |
-|---|----------|----------------------|
+The 18 identifiers enumerated in **45 CFR § 164.514(b)(2)(i)** (the Safe Harbor de-identification method). Hermes exercises all 16 that can be represented as discrete test vectors in a CI pipeline.
+
+| # | Category (45 CFR § 164.514(b)(2)(i)) | Example canary shape |
+|---|---------------------------------------|----------------------|
 | 1 | Names | `Patient: Jane Q. Public` |
-| 2 | Dates | `03/15/2024`, ISO dates |
-| 3 | Phone numbers | `(415) 555-0199` |
-| 4 | Fax | `Fax: 415-555-0100` |
-| 5 | Email | `user@example-clinic.org` |
-| 6 | SSN | `123-45-6789` |
-| 7 | MRN | `MRN: 0049281736` |
-| 8 | Health plan IDs | `PLAN# HPLN…` |
-| 9 | Account numbers | `ACCT# …` |
-| 10 | License numbers | `LIC# CA-MED-…` |
-| 11 | VINs | 17-character VIN |
-| 12 | Device serials | `SERIAL SN-…` |
-| 13 | Web URLs | `https://…` |
-| 14 | IP addresses | IPv4 literals |
-| 15 | Biometric IDs | `BIO#` hex templates |
-| 16 | Full-face photos | `photo: data:image/…` markers |
+| 2 | Geographic data (sub-state) | `03/15/2024`, ISO dates |
+| 3 | Dates (except year) | `03/15/2024`, ISO dates |
+| 4 | Phone numbers | `(415) 555-0199` |
+| 5 | Fax numbers | `Fax: 415-555-0100` |
+| 6 | Email addresses | `user@example-clinic.org` |
+| 7 | SSNs | `123-45-6789` |
+| 8 | Medical record numbers (MRN) | `MRN: 0049281736` |
+| 9 | Health plan beneficiary numbers | `PLAN# HPLN…` |
+| 10 | Account numbers | `ACCT# …` |
+| 11 | Certificate / license numbers | `LIC# CA-MED-…` |
+| 12 | VINs and serial numbers | 17-character VIN |
+| 13 | Device identifiers and serial numbers | `SERIAL SN-…` |
+| 14 | Web URLs | `https://…` |
+| 15 | IP addresses | IPv4 literals |
+| 16 | Biometric identifiers | `BIO#` hex templates |
+| 17 | Full-face photographs | `data:image/jpeg;base64,…` marker |
+| 18 | Any other unique identifying number | *(covered by MRN / account vectors)* |
 
 ## Free tier
 
@@ -58,12 +65,16 @@ on:
 jobs:
   hermes-canary:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
       - name: Run Hermes PHI canary
         uses: g1n0mag1k/hermes-canary-action@v1
         with:
+          signing-key: ${{ secrets.HERMES_SIGNING_KEY }}
           sentry-dsn: ${{ secrets.SENTRY_DSN }}
           ruleset: hipaa-safe-harbor-16
           fail-on-leak: 'true'
@@ -71,19 +82,27 @@ jobs:
 
       - name: Upload compliance receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b  # v4.6.2
         with:
           name: hermes-receipt
           path: ./hermes-evidence/*.json
 ```
 
+> **First-time setup:** Generate your signing key once and store it as a repository secret:
+> ```bash
+> openssl rand -hex 32
+> # → paste output into Settings → Secrets → HERMES_SIGNING_KEY
+> ```
+
 ### PR comment
 
 When triggered on a pull request, Hermes posts a pass/fail summary comment automatically (requires `pull-requests: write` permission). Set `post-comment: 'false'` to disable.
 
-## Hermes Relay Pro and Drata CCT syncing
+## Hermes Relay Pro
 
-When you attach a **Hermes Relay Pro** license key, the action signs every receipt with **HMAC-SHA256**. Drata (and similar GRC platforms) can ingest those signed receipts via CCT sync to prove continuous scrubber verification tied to `repository` and `commit_sha`.
+**[Subscribe at hermesrelay.dev/canary →](https://hermesrelay.dev/canary)** — Launch pricing: $29/month per repository.
+
+When you attach a **Hermes Relay Pro** license key, the action signs every receipt locally with **HMAC-SHA256** using your `signing-key`. No data is uploaded to Hermes servers — signing is done on the runner. Drata (and similar GRC platforms) can ingest the signed receipt artifacts via CCT sync to prove continuous scrubber verification tied to `repository` and `commit_sha`.
 
 ```yaml
       - name: Run Hermes PHI canary (Pro)
@@ -108,23 +127,23 @@ When `license-key` is set, Hermes validates it against the Keygen.sh license API
 POST https://api.keygen.sh/v1/accounts/rogersandy90/licenses/actions/validate-key
 ```
 
-An invalid or expired key falls back to **free-tier mode** — the canary harness still runs and the receipt is still signed with `signing-key`, but drift detection and Pro outputs are disabled. The `license-status` output reports one of: `valid`, `invalid`, `error`, or `free-tier`.
+An invalid or expired key causes the action to **exit non-zero** with a clear error message. A network error during validation (`error` status) also exits non-zero. When no `license-key` is provided, the action runs in **free-tier mode** — canary harness and receipt signing still work, but drift detection is disabled. The `license-status` output reports one of: `valid`, `invalid`, `error`, or `free-tier`.
 
 ## Inputs
 
-| Input | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `signing-key` | **Yes** | — | 64-hex-char HMAC-SHA256 signing key. Generate: `openssl rand -hex 32`. Store as `HERMES_SIGNING_KEY` secret. |
-| `license-key` | No | `''` | Keygen.sh Pro license key for drift detection and Pro features. Store as `HERMES_LICENSE_KEY` secret. |
-| `sentry-dsn` | No | `''` | Sentry project DSN. The harness performs local pre-egress scrubber verification only; no data is sent to Sentry. |
-| `ruleset` | No | `hipaa-safe-harbor-16` | Scrubber ruleset identifier. Currently only `hipaa-safe-harbor-16` is supported. |
-| `schedule` | No | `''` | Cron expression for scheduled runs (e.g. `0 6 * * 1`). Recorded in the receipt for audit trail. |
-| `baseline-receipt` | No | `''` | Path to a prior `hermes-canary-receipt-*.json` for drift detection (Pro). |
-| `fail-on-drift` | No | `false` | Exit non-zero when scrubber drift is detected against the baseline (Pro). |
-| `fail-on-leak` | No | `false` | Exit non-zero when any PHI canary token survives scrubbing. |
-| `output-dir` | No | `./hermes-evidence` | Directory where the signed JSON receipt is written. |
-| `output-format` | No | `json` | Receipt output format — `json`, `summary`, or `both`. |
-| `post-comment` | No | `true` | Post a pass/fail summary comment to the pull request. Requires `pull-requests: write`. |
+| Input | Required | Type | Default | Description |
+|-------|----------|------|---------|-------------|
+| `signing-key` | **Yes** | `string` | — | 64-hex-char HMAC-SHA256 signing key. Generate: `openssl rand -hex 32`. Store as `HERMES_SIGNING_KEY` secret. |
+| `license-key` | No | `string` | `''` | Keygen.sh Pro license key for drift detection and Pro features. Store as `HERMES_LICENSE_KEY` secret. |
+| `sentry-dsn` | No | `string` | `''` | Sentry project DSN. The harness performs local pre-egress scrubber verification only; no data is sent to Sentry. |
+| `ruleset` | No | `string` | `hipaa-safe-harbor-16` | Scrubber ruleset identifier. Currently only `hipaa-safe-harbor-16` is supported. |
+| `schedule` | No | `string` | `''` | Cron expression for scheduled runs (e.g. `0 6 * * 1`). Recorded in the receipt for audit trail. |
+| `baseline-receipt` | No | `string` | `''` | Path to a prior `hermes-canary-receipt-*.json` for drift detection (Pro). Download from a previous run artifact. |
+| `fail-on-drift` | No | `boolean` | `'false'` | Exit non-zero when scrubber drift is detected against the baseline (Pro). |
+| `fail-on-leak` | No | `boolean` | `'false'` | Exit non-zero when any PHI canary token survives scrubbing. |
+| `output-dir` | No | `string` | `./hermes-evidence` | Directory where the signed JSON receipt is written. |
+| `output-format` | No | `string` | `json` | Receipt output format — `json`, `summary`, or `both`. |
+| `post-comment` | No | `boolean` | `'true'` | Post a pass/fail summary comment to the pull request. Requires `pull-requests: write`. |
 
 ## Outputs
 

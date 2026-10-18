@@ -37,18 +37,22 @@ on:
 jobs:
   hermes-canary:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
       - name: Run Hermes PHI canary
         uses: g1n0mag1k/hermes-canary-action@v1
         with:
+          signing-key: ${{ secrets.HERMES_SIGNING_KEY }}
           ruleset: hipaa-safe-harbor-16
           fail-on-leak: 'true'
           output-dir: ./hermes-evidence
 ```
 
-Add `sentry-dsn: ${{ secrets.SENTRY_DSN }}` to validate remote scrubbing. Add `hermes-api-key: ${{ secrets.HERMES_API_KEY }}` for Pro signing and Relay archive.
+Add `sentry-dsn: ${{ secrets.SENTRY_DSN }}` to validate remote scrubbing. Add `license-key: ${{ secrets.HERMES_LICENSE_KEY }}` for Pro drift detection.
 
 ### Pricing table
 

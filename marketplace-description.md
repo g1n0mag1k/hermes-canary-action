@@ -44,7 +44,7 @@ Your assessor, counsel, and GRC platform still own control design and scope. Her
 2. **Apply** the configured scrubber ruleset the same way in-process or vendor-side scrubbers should.
 3. **Fail the job** when any canary survives redaction (`fail-on-leak`, default `true`).
 4. **Optionally probe Sentry** using a DSN: payloads are scrubbed before network egress.
-5. **Write evidence**: Free tier writes local JSON summary; **Pro** adds cryptographic signing and optional upload to Hermes Relay (`POST https://api.hermesrelay.dev/v1/telemetry/receipt` with `X-Hermes-Signature-256`).
+5. **Write evidence**: Every run writes a cryptographically signed JSON receipt to `output-dir` on the runner. **Pro** additionally enables drift detection against prior baselines and extended rulesets.
 
 Receipts include `receipt_id`, UTC timestamp, `repository`, `commit_sha`, `status`, `controls_verified`, and a `summary` block (`vectors_tested`, `canaries_intercepted`, `leaks_detected`). See the repository README for the full schema.
 
@@ -55,17 +55,18 @@ Receipts include `receipt_id`, UTC timestamp, `repository`, `commit_sha`, `statu
 Add a job to your workflow:
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
 - name: Run Hermes PHI canary
   uses: g1n0mag1k/hermes-canary-action@v1
   with:
+    signing-key: ${{ secrets.HERMES_SIGNING_KEY }}
     ruleset: hipaa-safe-harbor-16
     fail-on-leak: 'true'
     output-dir: ./hermes-evidence
 ```
 
-Optionally set `sentry-dsn` from secrets and `hermes-api-key` for Pro telemetry. Upload `./hermes-evidence/*.json` as a workflow artifact for auditors.
+Optionally set `sentry-dsn` from secrets and `license-key: ${{ secrets.HERMES_LICENSE_KEY }}` for Pro drift detection. Upload `./hermes-evidence/*.json` as a workflow artifact for auditors.
 
 ---
 
@@ -83,7 +84,7 @@ Optionally set `sentry-dsn` from secrets and `hermes-api-key` for Pro telemetry.
 | Extended rulesets | ❌ | ✅ |
 | Hermes Relay receipt archive | ❌ | ✅ |
 
-Subscribe at [hermesrelay.dev/canary](https://hermesrelay.dev/canary). After Stripe checkout, your license key appears on the Hermes dashboard for use as `hermes-api-key`.
+Subscribe at [hermesrelay.dev/canary](https://hermesrelay.dev/canary). After Stripe checkout, your license key appears on the Hermes dashboard — store it as `HERMES_LICENSE_KEY` in GitHub Secrets and pass it as the `license-key` input.
 
 ---
 
