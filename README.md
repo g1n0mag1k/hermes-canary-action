@@ -83,58 +83,90 @@ When triggered on a pull request, Hermes posts a pass/fail summary comment autom
 
 ## Hermes Relay Pro and Drata CCT syncing
 
-When you attach a **Hermes Relay Pro** API key, the action signs the receipt with **HMAC-SHA256** and POSTs it to Hermes Relay. Drata (and similar GRC platforms) can ingest those receipts via CCT sync to prove continuous scrubber verification tied to `repository` and `commit_sha`.
+When you attach a **Hermes Relay Pro** license key, the action signs every receipt with **HMAC-SHA256**. Drata (and similar GRC platforms) can ingest those signed receipts via CCT sync to prove continuous scrubber verification tied to `repository` and `commit_sha`.
 
 ```yaml
-      - name: Run Hermes PHI canary (Relay Pro)
+      - name: Run Hermes PHI canary (Pro)
         id: canary
         uses: g1n0mag1k/hermes-canary-action@v1
         with:
-          sentry-dsn: ${{ secrets.SENTRY_DSN }}
-          hermes-api-key: ${{ secrets.HERMES_API_KEY }}
+          signing-key: ${{ secrets.HERMES_SIGNING_KEY }}
+          license-key: ${{ secrets.HERMES_LICENSE_KEY }}
+          ruleset: hipaa-safe-harbor-16
+          fail-on-leak: 'true'
           output-dir: ./hermes-evidence
 
       - name: Surface receipt path
         run: echo "Receipt at ${{ steps.canary.outputs.receipt-path }}"
 ```
 
-Telemetry endpoint: `POST https://api.hermesrelay.dev/v1/telemetry/receipt`  
-Header: `X-Hermes-Signature-256` — HMAC-SHA256 of the canonical JSON body using `hermes-api-key` as the secret.
-
 ## Pro license validation
 
-When `hermes-api-key` is set Hermes validates the key against the Keygen.sh license endpoint before running. An invalid or expired key disables Pro features (signing and telemetry upload) for that run without failing the job on canary results. Set `validate-license` to `false` to skip validation (not recommended outside of local testing). The `license-status` output reports one of: `valid`, `invalid`, `error`, or `free-tier`.
+When `license-key` is set, Hermes validates it against the Keygen.sh license API before running:
+
+```
+POST https://api.keygen.sh/v1/accounts/rogersandy90/licenses/actions/validate-key
+```
+
+An invalid or expired key falls back to **free-tier mode** — the canary harness still runs and the receipt is still signed with `signing-key`, but drift detection and Pro outputs are disabled. The `license-status` output reports one of: `valid`, `invalid`, `error`, or `free-tier`.
 
 ## Inputs
 
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `sentry-dsn` | No | `''` | Sentry project DSN for optional scrubber reachability checks. Payloads are redacted before egress. |
-| `hermes-api-key` | No | `''` | Hermes Relay API key. When set, uploads a signed receipt to Hermes telemetry. |
-| `ruleset` | No | `hipaa-safe-harbor-16` | Scrubber ruleset identifier to execute. |
-| `fail-on-leak` | No | `true` | When `true`, the action exits with code `1` if any leak is detected. |
-| `output-dir` | No | `./hermes-evidence` | Directory for JSON receipts. |
+| `signing-key` | **Yes** | — | 64-hex-char HMAC-SHA256 signing key. Generate: `openssl rand -hex 32`. Store as `HERMES_SIGNING_KEY` secret. |
+| `license-key` | No | `''` | Keygen.sh Pro license key for drift detection and Pro features. Store as `HERMES_LICENSE_KEY` secret. |
+| `sentry-dsn` | No | `''` | Sentry project DSN. The harness performs local pre-egress scrubber verification only; no data is sent to Sentry. |
+| `ruleset` | No | `hipaa-safe-harbor-16` | Scrubber ruleset identifier. Currently only `hipaa-safe-harbor-16` is supported. |
+| `schedule` | No | `''` | Cron expression for scheduled runs (e.g. `0 6 * * 1`). Recorded in the receipt for audit trail. |
+| `baseline-receipt` | No | `''` | Path to a prior `hermes-canary-receipt-*.json` for drift detection (Pro). |
+| `fail-on-drift` | No | `false` | Exit non-zero when scrubber drift is detected against the baseline (Pro). |
+| `fail-on-leak` | No | `false` | Exit non-zero when any PHI canary token survives scrubbing. |
+| `output-dir` | No | `./hermes-evidence` | Directory where the signed JSON receipt is written. |
+| `output-format` | No | `json` | Receipt output format — `json`, `summary`, or `both`. |
+| `post-comment` | No | `true` | Post a pass/fail summary comment to the pull request. Requires `pull-requests: write`. |
 
 ## Outputs
 
 | Output | Description |
 |--------|-------------|
 | `status` | `PASSED` or `FAILED` based on canary harness outcome. |
-| `receipt-path` | Absolute path to the generated receipt file on the runner. |
+| `receipt-path` | Absolute path to the signed JSON receipt on the runner. |
+| `receipt` | Base64-encoded signed receipt JSON for downstream GRC gates. |
+| `drift-detected` | Whether scrubber drift was detected against the baseline (`true`/`false`). |
+| `comment-url` | URL of the pull request comment posted by Hermes, if any. |
+| `license-status` | Keygen license validation result: `valid`, `invalid`, `error`, or `free-tier`. |
 
 ## Receipt schema
 
-Every run writes a JSON receipt to `output-dir` (default `./hermes-evidence`). Free tier receipts have `hmac_sha256: ""`. Pro receipts have a populated HMAC-SHA256 signature over the canonical receipt body.
+Every run writes a signed JSON receipt to `output-dir` (default `./hermes-evidence`). The `signature` and `hmac_sha256` fields contain the HMAC-SHA256 over the canonical receipt body (both fields set to `""` before hashing). The `signed` field is `true` once the signature is written.
 
 ```json
 {
   "schema_version": "1.0",
   "receipt_id": "550e8400-e29b-41d4-a716-446655440000",
-  "timestamp": "2026-10-02T06:00:00Z",
+  "run_id": "12345678901",
+  "workflow_name": "CI",
   "repository": "your-org/your-repo",
-  "commit_sha": "abc123",
+  "commit_sha": "abc123def456abc123def456abc123def456abc123",
+  "triggered_by": "octocat (push)",
+  "schedule": "",
   "ruleset": "hipaa-safe-harbor-16",
   "status": "PASSED",
+  "token_count": 16,
+  "categories_tested": [
+    "names", "dates", "phone_numbers", "fax", "email", "ssn",
+    "mrn", "health_plan_ids", "account_numbers", "license_numbers",
+    "vins", "device_serials", "web_urls", "ip_addresses",
+    "biometric_ids", "full_face_photos"
+  ],
+  "categories_detected": [
+    "names", "dates", "phone_numbers", "fax", "email", "ssn",
+    "mrn", "health_plan_ids", "account_numbers", "license_numbers",
+    "vins", "device_serials", "web_urls", "ip_addresses",
+    "biometric_ids", "full_face_photos"
+  ],
+  "categories_missed": [],
   "controls_verified": [
     "names", "dates", "phone_numbers", "fax", "email", "ssn",
     "mrn", "health_plan_ids", "account_numbers", "license_numbers",
@@ -146,32 +178,56 @@ Every run writes a JSON receipt to `output-dir` (default `./hermes-evidence`). F
     "canaries_intercepted": 16,
     "leaks_detected": 0
   },
-  "hmac_sha256": ""
+  "drift": {
+    "evaluated": false,
+    "baseline_path": "",
+    "baseline_run_id": "",
+    "drift_detected": false,
+    "new_leaks": [],
+    "resolved_leaks": [],
+    "stopped_detecting": []
+  },
+  "timestamp": "2026-10-02T06:00:00Z",
+  "keygen_license_fingerprint": "",
+  "signed": true,
+  "signature": "a1b2c3d4e5f6...",
+  "hmac_sha256": "a1b2c3d4e5f6..."
 }
 ```
 
-## Verifying a Pro receipt
+## Verifying a receipt
+
+Use the bundled verifier script:
+
+```bash
+python scripts/verify_receipt.py hermes-evidence/hermes-canary-receipt-*.json "$HERMES_SIGNING_KEY"
+```
+
+Or verify programmatically — **both `"signature"` and `"hmac_sha256"` must be zeroed before hashing**:
 
 ```python
 import hmac, hashlib, json
 
-def verify_receipt(receipt: dict, api_key: str) -> bool:
-    body = {**receipt, "hmac_sha256": ""}
+def verify_receipt(receipt: dict, signing_key: str) -> bool:
+    # Zero BOTH signature fields before computing the canonical body
+    body = {**receipt, "signature": "", "hmac_sha256": ""}
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
     expected = hmac.new(
-        api_key.encode("utf-8"),
+        signing_key.encode("utf-8"),   # raw UTF-8 key — NOT hex-decoded bytes
         msg=canonical.encode("utf-8"),
         digestmod=hashlib.sha256,
     ).hexdigest()
-    return hmac.compare_digest(expected, receipt["hmac_sha256"])
+    return hmac.compare_digest(expected, receipt.get("signature", ""))
 ```
 
 ## Local development
 
 ```bash
 python3 -m pip install -r requirements.txt
+export SIGNING_KEY=$(openssl rand -hex 32)   # generate a local test key
 export RULESET=hipaa-safe-harbor-16
 export OUTPUT_DIR=./hermes-evidence
+export FAIL_ON_LEAK=false
 python3 entrypoint.py
 ```
 

@@ -8,11 +8,11 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
       - name: Run Hermes PHI canary (local composite)
         uses: ./
@@ -24,7 +24,7 @@ jobs:
 
       - name: Upload compliance receipts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b  # v4.6.2
         with:
           name: hermes-evidence
           path: ./hermes-evidence/*.json

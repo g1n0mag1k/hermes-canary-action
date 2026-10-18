@@ -393,8 +393,32 @@ def _validate_license(license_key: str) -> Tuple[str, str]:
         return ("error", f"Keygen unreachable: {exc}")
 
 
-def _sign_receipt(payload: Dict[str, Any], signing_key: str) -> str:
-    """HMAC-SHA256 over canonical JSON body using the customer's SIGNING_KEY."""
+def _hmac_selftest() -> None:
+    """Verify HMAC implementation is correct with a known test vector.
+
+    Raises RuntimeError if the implementation is broken — this runs once at
+    startup before any canary logic so a bad build fails loudly.
+    """
+    _key = "deadbeef" * 8  # 64 hex chars = 32 bytes, raw UTF-8 key
+    _body = {"a": 1, "b": 2, "hmac_sha256": "", "signature": ""}
+    _canonical = json.dumps(_body, sort_keys=True, separators=(",", ":"))
+    _expected = hmac.new(
+        _key.encode("utf-8"),
+        _canonical.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    # Recompute via the signing function path to check key encoding is consistent
+    _test_payload: Dict[str, Any] = {"a": 1, "b": 2, "signature": "", "hmac_sha256": ""}
+    _got = _sign_receipt_raw(_test_payload, _key)
+    if not hmac.compare_digest(_expected, _got):
+        raise RuntimeError(
+            f"HMAC selftest FAILED: expected={_expected!r} got={_got!r}. "
+            "Receipt signing is broken — aborting."
+        )
+
+
+def _sign_receipt_raw(payload: Dict[str, Any], signing_key: str) -> str:
+    """Inner implementation — called by _sign_receipt and _hmac_selftest."""
     signing_body = {**payload, "signature": "", "hmac_sha256": ""}
     canonical = json.dumps(signing_body, sort_keys=True, separators=(",", ":"))
     return hmac.new(
@@ -402,6 +426,11 @@ def _sign_receipt(payload: Dict[str, Any], signing_key: str) -> str:
         msg=canonical.encode("utf-8"),
         digestmod=hashlib.sha256,
     ).hexdigest()
+
+
+def _sign_receipt(payload: Dict[str, Any], signing_key: str) -> str:
+    """HMAC-SHA256 over canonical JSON body using the customer's SIGNING_KEY."""
+    return _sign_receipt_raw(payload, signing_key)
 
 
 def _load_baseline_receipt(path: str) -> Optional[Dict[str, Any]]:
@@ -503,6 +532,7 @@ def _build_receipt(
         "drift": drift,
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "keygen_license_fingerprint": _license_fingerprint(license_key) if license_key else "",
+        "signed": False,  # set to True after HMAC is computed and written
         "signature": "",
         "hmac_sha256": "",
     }
@@ -638,11 +668,18 @@ def _post_pr_comment(
         except Exception:  # noqa: BLE001
             return None
 
-    print(f"::warning::Hermes PR comment failed: {response.status_code} {response.text}")
+    print(f"::warning::Hermes PR comment failed: HTTP {response.status_code}")
     return None
 
 
 def main() -> int:  # noqa: C901
+    # Verify HMAC implementation before any canary logic runs
+    try:
+        _hmac_selftest()
+    except RuntimeError as exc:
+        print(f"::error::{exc}", file=sys.stderr)
+        return 1
+
     ruleset = os.environ.get("RULESET", "hipaa-safe-harbor-16")
     sentry_dsn = os.environ.get("SENTRY_DSN", "")
     license_key = os.environ.get("LICENSE_KEY", "").strip()
@@ -653,6 +690,12 @@ def main() -> int:  # noqa: C901
     fail_on_leak = os.environ.get("FAIL_ON_LEAK", "false").lower() in {"1", "true", "yes", "on"}
     output_dir = os.environ.get("OUTPUT_DIR", "./hermes-evidence")
     output_format = os.environ.get("OUTPUT_FORMAT", "json").lower()  # noqa: F841 (reserved for #10)
+
+    # Mask secrets immediately so they never appear in GitHub Actions logs
+    if signing_key:
+        print(f"::add-mask::{signing_key}")
+    if license_key:
+        print(f"::add-mask::{license_key}")
 
     # SIGNING_KEY is mandatory — unsigned receipts have no audit value
     if not signing_key:
@@ -707,6 +750,7 @@ def main() -> int:  # noqa: C901
     sig = _sign_receipt(receipt, signing_key)
     receipt["signature"] = sig
     receipt["hmac_sha256"] = sig  # backward-compat mirror
+    receipt["signed"] = True
 
     os.makedirs(output_dir, exist_ok=True)
     run_id = os.environ.get("GITHUB_RUN_ID", receipt["receipt_id"])

@@ -110,7 +110,7 @@ runs:
         fi
 
     - name: Setup Python 3.11
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@0acd0664bd7a1e3a0e4f81d615e34c7a3ffcfd0c  # v5.5.0
       with:
         python-version: '3.11'
 
