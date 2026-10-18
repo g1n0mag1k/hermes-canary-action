@@ -398,6 +398,13 @@ def _hmac_selftest() -> None:
 
     Raises RuntimeError if the implementation is broken — this runs once at
     startup before any canary logic so a bad build fails loudly.
+
+    Two invariants are checked:
+    1. HMAC correctness: _sign_receipt_raw produces the expected digest for a
+       known key/payload pair.
+    2. Mirror invariant: after a receipt is signed, receipt["signature"] and
+       receipt["hmac_sha256"] are always equal (hmac_sha256 is the
+       backward-compat alias; both must carry the same value).
     """
     _key = "deadbeef" * 8  # 64 hex chars = 32 bytes, raw UTF-8 key
     _body = {"a": 1, "b": 2, "hmac_sha256": "", "signature": ""}
@@ -407,13 +414,25 @@ def _hmac_selftest() -> None:
         _canonical.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
-    # Recompute via the signing function path to check key encoding is consistent
+    # Invariant 1 — HMAC correctness: signing function matches known digest
     _test_payload: Dict[str, Any] = {"a": 1, "b": 2, "signature": "", "hmac_sha256": ""}
     _got = _sign_receipt_raw(_test_payload, _key)
     if not hmac.compare_digest(_expected, _got):
         raise RuntimeError(
             f"HMAC selftest FAILED: expected={_expected!r} got={_got!r}. "
             "Receipt signing is broken — aborting."
+        )
+
+    # Invariant 2 — Mirror: receipt["signature"] == receipt["hmac_sha256"] after signing.
+    # hmac_sha256 is a backward-compat alias; both fields must always carry the same digest.
+    _mock_receipt: Dict[str, Any] = {**_test_payload, "signed": False, "signature": "", "hmac_sha256": ""}
+    _sig = _sign_receipt_raw(_mock_receipt, _key)
+    _mock_receipt["signature"] = _sig
+    _mock_receipt["hmac_sha256"] = _sig  # mirror — must match signature
+    if not hmac.compare_digest(_mock_receipt["signature"], _mock_receipt["hmac_sha256"]):
+        raise RuntimeError(
+            "HMAC selftest FAILED: receipt['signature'] != receipt['hmac_sha256']. "
+            "Mirror invariant is broken — aborting."
         )
 
 
