@@ -2,25 +2,25 @@
 
 ## Short description (≤ 300 characters)
 
-Use in the Marketplace **Summary** field. Character count: **259**.
+Use in the Marketplace **Summary** field. Character count: **~195**.
 
 ```text
-Synthetic HIPAA Safe Harbor canary tests for CI/CD with zero PHI egress. Verifies all 16 scrubber categories with signed receipts and PR pass/fail. Pro adds drift detection—launch pricing $29/mo per repo on hermesrelay.dev, not GitHub billing.
+Fire 16 synthetic PHI canaries through a local scrub probe in CI/CD. HMAC-SHA256 signed JSON receipt per run and PR pass/fail. Pro adds drift detection—launch pricing $29/mo per repo on hermesrelay.dev, not GitHub billing.
 ```
 
 ---
 
 ## Full listing body
 
-### Prove your scrubbers catch synthetic PHI—before real data leaks
+### Exercise your scrubbers against synthetic PHI—before real data reaches observability
 
 Healthtech teams rely on Sentry, Datadog, and similar tools for incident response. Those pipelines sit on the boundary where a misconfigured `before_send` hook or log processor can ship identifiers into a vendor you may not have under BAA. Manual spot checks do not scale, and copying realistic patient data into staging for tests creates its own compliance risk.
 
-**Hermes PHI Canary** is a composite GitHub Action that runs **synthetic** Safe Harbor canary vectors on every workflow trigger. No real patient data is used. When scrubbing succeeds, canary tokens never leave the runner in cleartext. Optional integrations validate remote scrubber behavior (for example Sentry DSN reachability with scrub-before-egress).
+**Hermes PHI Canary** is a composite GitHub Action that runs **synthetic** canary vectors on every workflow trigger. No real patient data is used. Each run fires 16 synthetic values at a local scrub probe shaped like Sentry events. When scrubbing succeeds, canary tokens never leave the runner in cleartext. The optional `sentry-dsn` input is parsed for format validation only—no HTTP request is made to Sentry in this release.
 
-Each run exercises **all 16 HIPAA Safe Harbor identifier categories**—names, dates, phone and fax, email, SSN, MRN, health plan and account numbers, license numbers, VINs, device serials, URLs, IP addresses, biometric identifiers, and full-face photo markers—against your selected ruleset (`hipaa-safe-harbor-16` by default).
+Coverage uses **16 synthetic canary categories patterned after HIPAA Safe Harbor identifiers (A–O)**—names, dates, phone and fax, email, SSN, MRN, health plan and account numbers, license numbers, VINs, device serials, URLs, and IP addresses—against your selected ruleset (`hipaa-safe-harbor-16` by default). Biometric identifiers and full-face photos are reference-only elsewhere in Hermes and are not in scope here.
 
-**Pro** subscribers get drift detection against prior baselines and optional archival via Hermes Relay. **Free** tier includes the full 16-category canary harness, HMAC-SHA256 signed receipts, and PR-friendly pass/fail signaling.
+**Pro** subscribers get drift detection against prior baselines and optional archival via Hermes Relay. **Free** tier includes the full canary harness, HMAC-SHA256 signed receipts, and PR-friendly pass/fail signaling.
 
 ---
 
@@ -31,20 +31,20 @@ Hermes is a **testing and documentation aid**, not a certification. It helps tea
 | CFR reference | Theme | How Hermes helps |
 |---------------|--------|------------------|
 | **45 CFR 164.312(b)** | Audit controls | Repeated, automated canary runs create a timestamped record of scrubber behavior tied to repository and commit. |
-| **45 CFR 164.316(b)** | Documentation | JSON receipts (Pro) and workflow artifacts document what was tested, when, and the outcome. |
+| **45 CFR 164.316(b)** | Documentation | JSON receipts and workflow artifacts document what was tested, when, and the outcome. |
 | **45 CFR 164.308(a)(8)** | Evaluation | Scheduled and PR-triggered runs support periodic evaluation of technical safeguards without production PHI. |
 
 Your assessor, counsel, and GRC platform still own control design and scope. Hermes gives engineers a repeatable way to **show** scrubber verification in CI/CD.
 
 ---
 
-### How it works (zero-PHI-egress)
+### How it works
 
-1. **Materialize** one synthetic vector per Safe Harbor category (16 total).
-2. **Apply** the configured scrubber ruleset the same way in-process or vendor-side scrubbers should.
+1. **Materialize** one synthetic vector per in-scope Safe Harbor–pattern category (16 total).
+2. **Apply** the configured scrubber ruleset on the runner—the same shape as in-process or vendor-side scrubbers should.
 3. **Fail the job** when any canary survives redaction (`fail-on-leak`, default `false` — set to `'true'` to enforce).
-4. **Optionally probe Sentry** using a DSN: payloads are scrubbed before network egress.
-5. **Write evidence**: Every run writes a cryptographically signed JSON receipt to `output-dir` on the runner. **Pro** additionally enables drift detection against prior baselines and extended rulesets.
+4. **Parse `sentry-dsn` (optional):** format validation only; no Sentry HTTP call in this release.
+5. **Write evidence:** Every run writes an HMAC-SHA256 signed JSON receipt to `output-dir` on the runner. **Pro** additionally enables drift detection against prior baselines.
 
 Receipts include `receipt_id`, UTC timestamp, `repository`, `commit_sha`, `status`, `controls_verified`, and a `summary` block (`vectors_tested`, `canaries_intercepted`, `leaks_detected`). See the repository README for the full schema.
 
@@ -66,7 +66,7 @@ Add a job to your workflow:
     output-dir: ./hermes-evidence
 ```
 
-Optionally set `sentry-dsn` from secrets and `license-key: ${{ secrets.HERMES_LICENSE_KEY }}` for Pro drift detection. Upload `./hermes-evidence/*.json` as a workflow artifact for auditors.
+Optionally set `sentry-dsn` from secrets (format validation only) and `license-key: ${{ secrets.HERMES_LICENSE_KEY }}` for Pro drift detection. Upload `./hermes-evidence/*.json` as a workflow artifact for auditors.
 
 ---
 
@@ -76,9 +76,9 @@ Optionally set `sentry-dsn` from secrets and `license-key: ${{ secrets.HERMES_LI
 
 | Feature | Free | Pro (launch pricing $29/mo per repo) |
 |---------|------|--------------------------------------|
-| 16 Safe Harbor canary tests | ✅ | ✅ |
+| 16 synthetic Safe Harbor–pattern canary tests | ✅ | ✅ |
 | PR comment with results | ✅ | ✅ |
-| Signed tamper-evident receipt | ✅ | ✅ |
+| HMAC-SHA256 signed JSON receipt | ✅ | ✅ |
 | Drift detection | ❌ | ✅ |
 | Hermes Relay receipt archive | ❌ | ✅ |
 
@@ -101,7 +101,7 @@ Marketplace install counts appear on the Action’s Marketplace page once publis
 ### Security and threat model
 
 - [SECURITY.md](https://github.com/g1n0mag1k/hermes-canary-action/blob/main/SECURITY.md) — vulnerability reporting and supported versions.
-- [THREAT-MODEL.md](https://github.com/g1n0mag1k/hermes-canary-action/blob/main/THREAT-MODEL.md) — trust boundaries, zero-PHI-egress guarantees, and Pro signing.
+- [THREAT-MODEL.md](https://github.com/g1n0mag1k/hermes-canary-action/blob/main/THREAT-MODEL.md) — trust boundaries, runner-local execution, and HMAC-SHA256 receipt signing.
 
 Questions: security@hermesrelay.dev
 

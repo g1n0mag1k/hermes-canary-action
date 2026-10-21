@@ -1,8 +1,5 @@
 name: Hermes PHI Canary
-description: >-
-  Zero-PHI-egress synthetic PHI canary tests for HIPAA-regulated CI/CD pipelines.
-  Verifies all 16 HIPAA Safe Harbor scrubber categories and writes a tamper-evident
-  signed receipt per run. Pro tier adds drift detection and scheduled cron execution.
+description: Fire 16 synthetic PHI canaries through a local scrub probe. Signed JSON receipt per run.
 branding:
   icon: shield
   color: green
@@ -16,7 +13,7 @@ inputs:
     description: 32-byte hex signing key for receipt HMAC-SHA256 (HERMES_SIGNING_KEY secret). Required — generate with `openssl rand -hex 32`.
     required: true
   sentry-dsn:
-    description: Optional Sentry DSN. The harness performs local pre-egress scrubber verification only; no data is sent to Sentry.
+    description: Sentry DSN parsed for format validation. No HTTP request is made to Sentry in this release.
     required: false
     default: ''
   ruleset:
@@ -82,6 +79,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        # TODO: switch receipt signing from HMAC-SHA256 to Ed25519 so auditors can verify with a public key alone. Target: after payment goes live. Tracked in hermesrelay.dev roadmap.
         signing_key="${{ inputs.signing-key }}"
         ruleset="${{ inputs.ruleset }}"
         fail_on_drift="${{ inputs.fail-on-drift }}"

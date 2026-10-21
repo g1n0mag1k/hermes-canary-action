@@ -11,19 +11,19 @@ Landing page target: **https://hermesrelay.dev/canary**
 Use one primary headline; rotate variants in ads or split tests.
 
 1. **Prove your PHI scrubbers work — on every PR.**
-2. **16 Safe Harbor categories. One GitHub Action. Signed proof.**
+2. **16 synthetic categories. One GitHub Action. Signed receipt.**
 3. **HIPAA audit controls in your CI/CD pipeline.**
 
 **Recommended default:** variant 1 (problem/solution clarity for engineering buyers).
 
 ### Subhead
 
-Synthetic canary tests for HIPAA-regulated pipelines—zero real PHI egress. Install from GitHub Marketplace; upgrade to Pro on Hermes Relay when you need signed receipts and drift detection.
+Synthetic canary tests for HIPAA-regulated pipelines—fake vectors only, runner-local scrub probe. Install from GitHub Marketplace; upgrade to Pro on Hermes Relay when you need drift detection and extended features.
 
 ### Three-bullet value prop
 
 - **Drop in with two lines of YAML.** No new infrastructure—runs on `ubuntu-latest` beside your existing CI.
-- **Get a signed, tamper-evident receipt per run** for auditors and GRC platforms (Hermes Canary Pro).
+- **Get an HMAC-SHA256 signed JSON receipt per run** (free tier and Pro) for auditors and GRC platforms.
 - **Catch scrubber regressions before production** when Sentry, Datadog, or custom log processors change.
 
 ### Quick-start YAML
@@ -52,7 +52,7 @@ jobs:
           output-dir: ./hermes-evidence
 ```
 
-Add `sentry-dsn: ${{ secrets.SENTRY_DSN }}` to validate remote scrubbing. Add `license-key: ${{ secrets.HERMES_LICENSE_KEY }}` for Pro drift detection.
+Add `sentry-dsn: ${{ secrets.SENTRY_DSN }}` for DSN format validation (no Sentry HTTP in this release). Add `license-key: ${{ secrets.HERMES_LICENSE_KEY }}` for Pro drift detection.
 
 ### Pricing table
 
@@ -61,7 +61,7 @@ Add `sentry-dsn: ${{ secrets.SENTRY_DSN }}` to validate remote scrubbing. Add `l
 | Price | $0 (GitHub Action install) | **Launch pricing: $29/month per repository** |
 | 16 Safe Harbor canary tests | ✅ | ✅ |
 | PR comment with results | ✅ | ✅ |
-| Signed tamper-evident receipt | — | ✅ |
+| HMAC-SHA256 signed JSON receipt | ✅ | ✅ |
 | Drift detection | — | ✅ |
 | Datadog log intake validation | — | ✅ |
 | Extended rulesets | — | ✅ |
@@ -98,7 +98,7 @@ Yes—add `schedule:` cron alongside `pull_request` for weekly evaluation aligne
 
 Link prominently: **[Security & threat model →](https://github.com/g1n0mag1k/hermes-canary-action/blob/main/SECURITY.md)** and **[THREAT-MODEL.md](https://github.com/g1n0mag1k/hermes-canary-action/blob/main/THREAT-MODEL.md)**.
 
-One-line blurb: Zero-PHI-egress design, scrub-before-egress for optional Sentry probes, HMAC-signed Pro telemetry—details in our published threat model.
+One-line blurb: Runner-local synthetic canaries, optional `sentry-dsn` format validation (no Sentry HTTP this release), HMAC-SHA256 signed receipts—details in our published threat model.
 
 ---
 
@@ -120,11 +120,11 @@ Same as landing section above.
 
 I own HIPAA technical controls for our health SaaS, and for years the scariest gap in our stack wasn’t the database—it was **observability**. Sentry and Datadog are invaluable when production misbehaves, but they also sit on the path where a bad `before_send` tweak or log parser regression can ship identifiers outside our boundary. We BAAs where we can, yet “trust the scrubber” isn’t something I want to explain to an auditor with a straight face.
 
-We wanted **continuous, cheap proof** that scrubbers still catch all **16 HIPAA Safe Harbor categories**—without copying realistic patient data into staging and without sending cleartext PHI to vendors just to “test.” I couldn’t find a published GitHub Action with this capability, so we built **Hermes PHI Canary**: a composite Action that materializes synthetic canary vectors, runs them through our ruleset, fails the job on any leak, and (on Pro) emits a **tamper-evident signed receipt** tied to repo and commit SHA.
+We wanted **continuous, cheap evidence** that our local scrub probe still catches **16 synthetic canary categories patterned after HIPAA Safe Harbor identifiers (A–O)**—without copying realistic patient data into staging. I couldn’t find a published GitHub Action with this capability, so we built **Hermes PHI Canary**: a composite Action that materializes synthetic canary vectors, runs them through our ruleset, fails the job on any leak, and emits an **HMAC-SHA256 signed JSON receipt** tied to repo and commit SHA (drift detection on Pro).
 
-It’s **zero-PHI-egress** by design: canaries are fake, and optional Sentry checks scrub before anything hits the network. That maps cleanly to how we think about **45 CFR 164.312(b)** audit evidence, **164.316(b)** documentation, and **164.308(a)(8)** periodic evaluation—engineering signal, not a substitute for counsel.
+Canaries are fake and run on the runner; optional `sentry-dsn` is format-checked only—no HTTP to Sentry in this release. That maps cleanly to how we think about **45 CFR 164.312(b)** audit evidence, **164.316(b)** documentation, and **164.308(a)(8)** periodic evaluation—engineering signal, not a substitute for counsel.
 
-The Action is open on GitHub and listed on Marketplace for install. **Free to install. Signed receipts and drift detection are Pro at $29/month** (launch pricing, per repo) via [hermesrelay.dev/canary](https://hermesrelay.dev/canary).
+The Action is open on GitHub and listed on Marketplace for install. **Free to install with signed receipts; drift detection is Pro at $29/month** (launch pricing, per repo) via [hermesrelay.dev/canary](https://hermesrelay.dev/canary).
 
 Repo: [github.com/g1n0mag1k/hermes-canary-action](https://github.com/g1n0mag1k/hermes-canary-action)
 
@@ -140,7 +140,7 @@ If you’re wrestling with the same observability boundary problem, I’d love f
 
 Sharing a project our team built for a common health-IT engineering problem: **error monitoring and log pipelines** (Sentry, Datadog, etc.) can leak identifiers if scrubbers drift, but testing scrubbers often means either synthetic manual checks or risky use of realistic data in lower environments.
 
-**Hermes PHI Canary** is a composite GitHub Action that runs **synthetic** vectors for all **16 HIPAA Safe Harbor categories** on each workflow run. Nothing real leaves the runner when scrubbing works; optional Sentry validation scrubs before egress. Failed runs block the PR so regressions don’t reach prod.
+**Hermes PHI Canary** is a composite GitHub Action that runs **synthetic** vectors for **16 Safe Harbor–pattern categories** on each workflow run via a local scrub probe. Nothing real leaves the runner when scrubbing works; optional `sentry-dsn` is parsed for format only (no Sentry HTTP this release). Failed runs block the PR when `fail-on-leak` is enabled so regressions don’t reach prod.
 
 We use it as technical evidence alongside **164.312(b) / 164.316(b) / 164.308(a)(8)**-style programs—not as “HIPAA certification.”
 
@@ -163,7 +163,7 @@ Use for **Hermes Canary Pro** license issuance tied to Stripe.
 - [ ] **Policy:** Attach policy **`monthly-subscription`** with:
   - [ ] **Max activations:** 5 per license (CI runners / repos within fair use—document in dashboard FAQ).
   - [ ] **Offline validation:** enabled (runners validate without calling Keygen every job).
-  - [ ] **Ed25519 signing:** enabled for license payloads.
+  - [ ] **License payload signing:** enabled per Keygen policy (offline JWT licenses).
 - [ ] **License format:** Issue **offline-signed JWT** licenses; document JWT claims (`sub`, `repo`, `exp`, `policy_id`) in dashboard help.
 - [ ] **Stripe linkage:** Store Stripe `customer_id` and `subscription_id` on Keygen license metadata at creation.
 - [ ] **Webhook — activation:** On Keygen `license.validation` or `machine.created` (per your policy), **confirm Stripe subscription is `active`**; deactivate license if subscription canceled or past_due.

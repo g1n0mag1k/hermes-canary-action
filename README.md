@@ -5,9 +5,9 @@
 
 # hermes-canary-action
 
-Zero-PHI-egress synthetic PHI canary tests and tamper-evident compliance receipts for healthtech CI/CD pipelines. Drop this composite GitHub Action into your workflow to verify that error monitoring scrubbers (for example Sentry `before_send`, Relay processors, or Drata CCT-linked policies) redact all **16 HIPAA Safe Harbor** identifier categories before telemetry leaves your boundary.
+Synthetic PHI canary tests and HMAC-SHA256 signed compliance receipts for healthtech CI/CD pipelines. Drop this composite GitHub Action into your workflow to exercise a **local scrub probe** shaped like Sentry events—16 synthetic canary categories patterned after HIPAA Safe Harbor identifiers (A–O)—so you can catch scrubber regressions in CI before real telemetry leaves your boundary.
 
-## How zero-PHI-egress canary mechanics work
+## How synthetic canary mechanics work
 
 Traditional PHI tests often require copying realistic patient data into staging or sending payloads to third-party observability vendors. That increases breach surface and complicates BAA scope.
 
@@ -16,14 +16,14 @@ Hermes uses **synthetic canaries** only: fixed, obviously fake Safe Harbor patte
 1. **Materializes** one vector per Safe Harbor category (16 total).
 2. **Applies** the selected scrubber ruleset (`hipaa-safe-harbor-16` by default) the same way an in-process or Sentry-side scrubber should.
 3. **Detects leaks** if any raw canary token survives redaction.
-4. **Optionally validates Sentry DSN** by scrubbing *before* any network call; only redacted probe metadata is emitted when a DSN is configured.
+4. **Optionally parses and validates `sentry-dsn` format**; no HTTP request is made to Sentry in this release.
 5. **Writes a cryptographic receipt** (JSON) to your workspace for auditors, GRC tools, or Hermes Relay Pro.
 
 No real patient data is used. Canary strings never leave the runner in cleartext when scrubbing succeeds.
 
 ### Safe Harbor categories exercised
 
-The 18 identifiers enumerated in **45 CFR § 164.514(b)(2)(i)** (the Safe Harbor de-identification method). Hermes exercises the 16 that can be represented as discrete test vectors in a CI pipeline (geographic data sub-state and "any other unique identifying number" are covered by the MRN/account vectors rather than dedicated canaries).
+16 synthetic canary categories patterned after HIPAA Safe Harbor identifiers (A–O). Biometric identifiers and full-face photos are reference-only elsewhere in Hermes and are not in scope here.
 
 | # | Category (45 CFR § 164.514(b)(2)(i)) | Example canary shape |
 |---|---------------------------------------|----------------------|
@@ -41,8 +41,8 @@ The 18 identifiers enumerated in **45 CFR § 164.514(b)(2)(i)** (the Safe Harbor
 | 12 | Device identifiers and serial numbers | `SERIAL SN-…` |
 | 13 | Web URLs | `https://…` |
 | 14 | IP addresses | IPv4 literals |
-| 15 | Biometric identifiers | `BIO#` hex templates |
-| 16 | Full-face photographs | `data:image/jpeg;base64,…` marker |
+| 15 | Biometric identifiers | Reference-only elsewhere in Hermes (not in scope for this action) |
+| 16 | Full-face photographs | Reference-only elsewhere in Hermes (not in scope for this action) |
 
 ## Free tier
 
@@ -96,6 +96,22 @@ jobs:
 
 When triggered on a pull request, Hermes posts a pass/fail summary comment automatically (requires `pull-requests: write` permission). Set `post-comment: 'false'` to disable.
 
+## What a passing run means
+
+- **Local scrub probe.** Each run fires 16 synthetic canary values at a
+  local scrub probe shaped like Sentry events. The action does not
+  currently transmit canaries to Sentry over HTTP. The `sentry-dsn`
+  input is parsed and validated but no network request is made to it
+  in this release.
+- **Signed receipt.** The run produces an HMAC-SHA256 signed JSON
+  receipt. Anyone with the signing key can verify or forge the tag, so
+  this proves the receipt wasn't altered between the runner and a
+  verifier holding the same key — not third-party non-repudiation.
+- **Not a HIPAA compliance determination.** A passing run is evidence
+  that the local scrub probe caught the synthetic test vectors used.
+  It does not establish HIPAA compliance, Safe Harbor de-identification
+  of real data, or recall on messy real-world free text.
+
 ## Hermes Relay Pro
 
 **[Subscribe at hermesrelay.dev/canary →](https://hermesrelay.dev/canary)** — Launch pricing: $29/month per repository.
@@ -133,7 +149,7 @@ An invalid or expired key causes the action to **exit non-zero** with a clear er
 |-------|----------|------|---------|-------------|
 | `signing-key` | **Yes** | `string` | — | 64-hex-char HMAC-SHA256 signing key. Generate: `openssl rand -hex 32`. Store as `HERMES_SIGNING_KEY` secret. |
 | `license-key` | No | `string` | `''` | Keygen.sh Pro license key for drift detection and Pro features. Store as `HERMES_LICENSE_KEY` secret. |
-| `sentry-dsn` | No | `string` | `''` | Sentry project DSN. The harness performs local pre-egress scrubber verification only; no data is sent to Sentry. |
+| `sentry-dsn` | No | `string` | `''` | Sentry DSN parsed for format validation. No HTTP request is made to Sentry in this release. |
 | `ruleset` | No | `string` | `hipaa-safe-harbor-16` | Scrubber ruleset identifier. Currently only `hipaa-safe-harbor-16` is supported. |
 | `schedule` | No | `string` | `''` | Cron expression for scheduled runs (e.g. `0 6 * * 1`). Recorded in the receipt for audit trail. |
 | `baseline-receipt` | No | `string` | `''` | Path to a prior `hermes-canary-receipt-*.json` for drift detection (Pro). Download from a previous run artifact. |

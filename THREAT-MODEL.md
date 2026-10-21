@@ -21,9 +21,9 @@
 
 The publisher receives **zero telemetry, zero receipts, zero customer payload data, zero PHI, and zero signing keys** from action runs. Only Keygen.sh receives the license validation request over TLS during startup.
 
-## Zero-PHI-egress guarantee
+## Runner-local execution and network scope
 
-Canary strings are dynamically randomized synthetic tokens and do not meet the HIPAA definition of PHI under **45 CFR § 160.103**. No canary test logic makes external network calls. When `sentry-dsn` is provided, the harness performs local DSN syntax verification and pre-egress scrubber verification without transmitting canary probes over the network. Customers remain responsible for ensuring their CI workflow does not route production ePHI into test runners.
+Canary strings are dynamically randomized synthetic tokens and do not meet the HIPAA definition of PHI under **45 CFR § 160.103**. Canary scrubbing runs locally on the GitHub Actions runner. The only routine external call from the harness is optional Keygen license validation (`api.keygen.sh`). When `sentry-dsn` is provided, the DSN is parsed and validated for format only—no HTTP request is made to Sentry in this release. Customers remain responsible for ensuring their CI workflow does not route production ePHI into test runners.
 
 ## Secret handling
 
@@ -34,7 +34,7 @@ Canary strings are dynamically randomized synthetic tokens and do not meet the H
 
 ## Signing
 
-Every receipt is signed locally with HMAC-SHA256 using `signing-key` as the secret over the canonical JSON body (`sort_keys=True, separators=(",", ":")` with `signature` and `hmac_sha256` set to `""`). The resulting hex digest is written to `signature` (and mirrored to `hmac_sha256` for backward compatibility). Verifiers within the customer's organization can re-derive the signature using their `signing-key` to confirm the receipt was not altered after the run.
+Every receipt is signed locally with HMAC-SHA256 using `signing-key` as the secret over the canonical JSON body (`sort_keys=True, separators=(",", ":")` with `signature` and `hmac_sha256` set to `""`). The resulting hex digest is written to `signature` (and mirrored to `hmac_sha256` for backward compatibility). Anyone with the same `signing-key` can re-derive the tag to check the receipt was not altered after the run, or forge a matching tag—this is shared-secret integrity, not auditor verification with a public key alone.
 
 ## Observer mode & exit behavior
 
